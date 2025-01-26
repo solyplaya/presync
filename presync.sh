@@ -1,6 +1,10 @@
 #!/bin/bash
 
-# Script to sync renamed filesystem structure between 2 syned directories.
+# PreSync v 1.0 - 2025-01-26
+# (c) 2025 Francisco Gonzalez
+# BSD-2 License - or like sqlite3 and yt-dlp, unlicense public domain. To decide.
+#
+# Script to sync renamed filesystem structure between 2 synced directories.
 # Does not copy or delete any files, only renames existing files in target
 # directory based on content hash to prevent unneeded file copying on rsync
 # command run.
@@ -12,13 +16,21 @@
 # --reuse-db reuses db if present without asking
 # --flush-db removes any existing db without asking. If --reuse-db is provided, --reuse-db takes preference
 # --keep-db does not delete the database after running.
-# each database is associated to a source/destination folder combination and stored in tmp folder
 # --resume ... implies reuse-db. Continue processing files from last record in database, as long as there's a DB of course.
 # --debug dumps database of targets before / after processing
+# --verbose Causes to show all files in source folder instead only ones that need moving
 #
 # TODO:
-# - add progress count of files processed in source
-# - add stats of synced files
+# - rework paramater parsing
+# - add support for partial file hashes with optional chunk size with param validation regex: head -c 1024k largefile | xxh128sum
+# - add usage information / documentation / license info
+# - add stats of actions done, specially useful for --quiet view
+# - log file option? (moved files and renamed files in the log)
+# - bring this to fossil-scm... it is growing a bit more than a one time use shell script for my file sync needs.
+#
+# For the DOCS:
+# Each database is associated to a source/destination folder combination and stored in tmp folder
+
 set -o nounset
 
 src="${1:-}"
@@ -34,11 +46,12 @@ dry_run=0
 resume=0
 debug=0
 quiet=0
+verbose=0
 
 add_to_db() {
 
     local file="$1"
-    local hash=$($hasher "$file" 2>/dev/null | cut -d' ' -f1)
+    local hash=$($hasher "$file" 2>/dev/null | cut -d' ' -f1) # xxh128sum messes inplace line display with output to stderr here
     local path="${file}"
 
     # only add if we could read the file to compute the hash
@@ -52,6 +65,7 @@ add_to_db() {
 
 cleanup_exit() {
 
+    clear_line
     [[ "$keep_db" = 0 ]] && rm "$db"
     exit
 
@@ -77,8 +91,6 @@ collect_target_hashes() {
     files=$(find "$dst" -type f | sort)
     total=$(wc -l <<< "$files")
 
-    # echo "Found $total files to process."
-
     if [[ "$resume" = 1 ]]; then
 
         resume_file=$(get_last_file)
@@ -100,7 +112,6 @@ collect_target_hashes() {
         inplace_msg "[${idx}/${total}] $file"
 
         add_to_db "${file}"
-
 
     done
 
@@ -202,6 +213,7 @@ info_msg() {
 
 inplace_msg() {
 
+    clear_line
     echo -ne "${1:-}\r"
 }
 
@@ -260,6 +272,17 @@ sync_target() {
     local hash
     local target
 
+    local idx=0
+    local IFS=$'\n'
+    local files
+    local total=0
+
+    # stats: totla files in source, total files in dest, total renamed files
+    #        total identcal files in same path, total files in source not in target
+    #        total files in target not in source
+
+    local moved_files=0
+
     db_init
 
     if [[ "$reuse_db" = 0 || "$resume" = 1 ]]; then
@@ -276,12 +299,19 @@ sync_target() {
     # add progress here
     # print message regardless of verbosity level
     echo "Processing sources and presyncing..."
+    print_msg "(Only files in need of reloaction are shown below)"
 
-    while IFS= read -d $'\0' -r file; do
+    files=$(find "$src" -type f | sort)
+    total=$(wc -l <<< "$files")
 
+    for file in $files; do
 
-        [[ "$quiet" = 1 ]] && inplace_msg "Processing: $file"
+        (( idx++ ))
 
+        [[ "$quiet" = 1 ]] && inplace_msg "[${idx}/${total}] $file"
+
+        # verbose mode, show all files
+        [[ "$verbose" = 1 ]] && info_msg "[${idx}/${total}]: $file"
 
         hash=$($hasher "$file" | cut -d' ' -f1)
         target="${file/#$src/$dst}"
@@ -294,7 +324,8 @@ sync_target() {
         # file exists in another path?
         if [[ -n "$existing_target" ]]; then
 
-            info_msg "Processing: $file"
+            # normal mode, show only files being processed
+            [[ "$verbose" = 0 ]] && info_msg "[${idx}/${total}]: $file"
 
             # Rename existing target with different content since we have a candidate to take its place.
             [[ -f "$target" ]] && rename_existing_target "$hash" "$target"
@@ -320,7 +351,7 @@ sync_target() {
 
         fi
 
-    done < <(find "$src" -type f -print0 | sort -z)
+    done
 
     if [[ "$debug" = 1 ]]; then
         notice_msg "\nList of collected target hashes after processing: (id, hash, path, used)"
@@ -345,13 +376,14 @@ main() {
     command -v "$hasher" > /dev/null || error_exit "The program \"$hasher\" is required to process file hashess"
 
     # options processing
-    [[ " $* " == *" --keep-db "* ]] && keep_db=1
     [[ " $* " == *" --reuse-db "* ]] && reuse_db=1
     [[ " $* " == *" --flush-db "* ]] && flush_db=1
+    [[ " $* " == *" --keep-db "* ]] && keep_db=1
     [[ " $* " == *" --dry-run "* ]] && dry_run=1
     [[ " $* " == *" --resume "* ]] && resume=1
     [[ " $* " == *" --debug "* ]] && debug=1
     [[ " $* " == *" --quiet "* ]] && quiet=1
+    [[ " $* " == *" --verbose "* ]] && verbose=1
 
     if [[ "$dry_run" = 1 ]]; then
         keep_db=1
