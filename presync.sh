@@ -1,27 +1,41 @@
 #!/bin/bash
 
 # PreSync v 1.0 - 2025-01-26
-# (c) 2025 Francisco Gonzalez
-# BSD-2 License - or like sqlite3 and yt-dlp, unlicense public domain. To decide.
 #
-# Script to sync renamed filesystem structure between 2 synced directories.
-# Does not copy or delete any files, only renames existing files in target
-# directory based on content hash to prevent unneeded file copying on rsync
-# command run.
-
-# Note that script is not smart enough to handle the scenario where you rename src/A to src/B, the script will
-# move all the files in dst/A to dst/B one by one, instead of renaming the folder.
-
-# --dry-run implies --keep-db (gotcha not 100% same final result) USeful also to pregenerate the hases db of target
-# --reuse-db reuses db if present without asking
-# --flush-db removes any existing db without asking. If --reuse-db is provided, --reuse-db takes preference
-# --keep-db does not delete the database after running.
-# --resume ... implies reuse-db. Continue processing files from last record in database, as long as there's a DB of course.
-# --debug dumps database of targets before / after processing
-# --verbose Causes to show all files in source folder instead only ones that need moving
-# --partial= use the provided number of kilobytes from the begining of the file for partial checksum calculations
-# -p same as partial but use the default 1024kb head size instead of specifying one
+# BSD-2 License
 #
+# Copyright 2025 Francisco Gonzalez. All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or
+# without modification, are permitted provided that the
+# following conditions are met:
+#
+#   1. Redistributions of source code must retain the above
+#      copyright notice, this list of conditions and the
+#      following disclaimer.
+#
+#   2. Redistributions in binary form must reproduce the above
+#      copyright notice, this list of conditions and the
+#      following disclaimer in the documentation and/or other
+#      materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS
+# OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHORS OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+# BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+# OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+# EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+# The views and conclusions contained in the software and documentation
+# are those of the authors and contributors and should not be interpreted
+# as representing official policies, either expressed or implied, of anybody
+# else.
+
 # TODO:
 # x rework paramater parsing
 # x add support for partial file hashes with optional chunk size with param validation regex: head -c 1024k largefile | xxh128sum
@@ -39,6 +53,8 @@ set -o nounset
 
 hasher="xxh128sum"
 tmp="/tmp"
+
+VERSION="1.0"
 
 src=""
 dst=""
@@ -272,13 +288,61 @@ update_path() {
 
 show_help() {
 
-    echo "
-This script synchronizes renamed folder content based on file hashes.
-    Usage: $0 <source_directory> <target_directory>
+    echo "presync version $VERSION Copyright (c) Francisco Gonzalez
+
+presync renames files in a backup to match a reorganized source folder enabling
+efficient synchronization with rsync without unnecessary file copying.
+
+Usage: presync [OPTION]... SRC DEST
+
+Options
+--debug, -d      dumps database of targets before / after processing
+--dry-run        trial run without file changes (implies --keep-db)
+--flush-db, -f   remove any existing db without asking
+--help, -h       show this help
+--keep-db, -k    don't delete database after running (ignores --flush-db)
+-p               same as --partial $head_size
+--partial SIZE   calc checksums using at most N kilobytes from file
+--quiet, -q      show less text output and use inplace progress messages
+--resume         resume from last record in database (implies --reuse-db)
+--reuse-db, -r   use an existing database of targets without asking
+--verbose, -v    increase verbosity
+
+presyn does not copy or delete any files, only renames existing files in the
+destination directory based on content hash to prevent unnecessary file copying
+on rsync (or similar) command run.
+
+presync only considers files, so if you rename a folder src/A to src/B,
+the script will move all the files in dst/A to dst/B one by one, instead of
+renaming the folder. Empty folders left behind are there to be deleted by your
+rsync program run.
+
+On conflicts existing files get renamed to filename_[renamed_1].ext
+
+Using the --partial argument you can speed up the synchronization process since
+only a smaller amount of data from the begining of each file is used to calc
+its checksum. This could lead to some false file matchings in the event that
+various files share the same header data. Since no files are deleted or
+overwritten, any incorrectly reorganized files will get resolved by rsync.
+
+Database files are stored in /tmp/presync-[SOURCE|DEST|PARTIAL_SIZE].sqlite
+and deleted after a successfull run unless --keep-db or --dry-run options are
+given.
+
+Example usage:
+
+synchronize renamed files in backup
+    presync /home/user/Pictures /media/backup/Pictures
+
+synchronize move collection on slow USB drive with huge files:
+    presync --partial 2048 --keep-db /media/movies /media/movies_backup
+
 "
     exit
 
 }
+
+
 
 sync_target() {
 
