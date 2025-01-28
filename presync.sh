@@ -45,6 +45,7 @@
 # x bring this to fossil-scm... it is growing a bit more than a one time use shell script for my file sync needs.
 # - add command to wipe all databases in temp dir. aka rm /tmp/presync-*.sqlite3
 # - move todo list to fossil
+# - refactor message printing
 #
 # For the DOCS:
 # Each database is associated to a source/destination folder combination and stored in tmp folder
@@ -69,6 +70,7 @@ partial=0
 quiet=0
 resume=0
 reuse_db=0
+term_width=80
 verbose=0
 
 add_to_db() {
@@ -242,8 +244,22 @@ info_msg() {
 
 inplace_msg() {
 
+    local msg="${1:-}"
+    local max_len
+    local msg_left
+    local msg_right
+
     clear_line
-    echo -ne "${1:-}\r"
+
+    if [ ${#msg} -gt $term_width ]; then
+        max_len=$((term_width - 5))
+        msg_left=$((max_len / 2))
+        msg_right=$((max_len - msg_left))
+        msg="${msg:0:$msg_left}...${msg: -$msg_right}"
+    fi
+
+    echo -ne "${msg}\r"
+
 }
 
 is_same_file() {
@@ -439,6 +455,7 @@ sync_target() {
         db_query "select * from files;"
     fi
 
+    clear_line
     echo "Done!"
 
 }
@@ -514,6 +531,9 @@ main() {
     [[ ! -d "$src" || ! -r "$dst" ]] && error_exit "Source directory does not exist or is not readable!"
     [[ ! -d "$dst" || ! -w "$dst" ]] && error_exit "Destination directory does not exist or is not writable!"
     [[ ! -d "$tmp" || ! -w "$tmp" ]] && error_exit "Temp directory does not exist or is not writable!"
+
+    # prevent long inplace messages from cluttering the terminal window
+    term_width=$(tput cols)
 
     if [[ "$dry_run" = 1 ]]; then
         keep_db=1
