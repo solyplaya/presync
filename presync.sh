@@ -19,40 +19,54 @@
 # --resume ... implies reuse-db. Continue processing files from last record in database, as long as there's a DB of course.
 # --debug dumps database of targets before / after processing
 # --verbose Causes to show all files in source folder instead only ones that need moving
+# --partial= use the provided number of kilobytes from the begining of the file for partial checksum calculations
+# -p same as partial but use the default 1024kb head size instead of specifying one
 #
 # TODO:
-# - rework paramater parsing
-# - add support for partial file hashes with optional chunk size with param validation regex: head -c 1024k largefile | xxh128sum
+# x rework paramater parsing
+# x add support for partial file hashes with optional chunk size with param validation regex: head -c 1024k largefile | xxh128sum
 # - add usage information / documentation / license info
 # - add stats of actions done, specially useful for --quiet view
 # - log file option? (moved files and renamed files in the log)
-# - bring this to fossil-scm... it is growing a bit more than a one time use shell script for my file sync needs.
+# x bring this to fossil-scm... it is growing a bit more than a one time use shell script for my file sync needs.
+# - add command to wipe all databases in temp dir. aka rm /tmp/presync-*.sqlite3
+# - move todo list to fossil
 #
 # For the DOCS:
 # Each database is associated to a source/destination folder combination and stored in tmp folder
 
 set -o nounset
 
-src="${1:-}"
-dst="${2:-}"
-tmp="/tmp"
 hasher="xxh128sum"
+tmp="/tmp"
 
+src=""
+dst=""
 db="${tmp}/presync.sqlite3"
-keep_db=0
-reuse_db=0
-flush_db=0
-dry_run=0
-resume=0
+
 debug=0
+dry_run=0
+flush_db=0
+head_size=1024
+keep_db=0
+partial=0
 quiet=0
+resume=0
+reuse_db=0
 verbose=0
 
 add_to_db() {
 
     local file="$1"
-    local hash=$($hasher "$file" 2>/dev/null | cut -d' ' -f1) # xxh128sum messes inplace line display with output to stderr here
+    local hash=""
     local path="${file}"
+
+    # xxh128sum messes inplace line display with output to stderr here
+    if [[ "$partial" = 1 ]]; then
+        hash=$(head -c ${head_size}k $file | $hasher 2>/dev/null | cut -d' ' -f1)
+    else
+        hash=$($hasher "$file" 2>/dev/null | cut -d' ' -f1)
+    fi
 
     # only add if we could read the file to compute the hash
     if [[ -n "$hash" ]]; then
@@ -117,11 +131,10 @@ collect_target_hashes() {
 
 }
 
-
 db_init() {
 
     local response
-    local params_hash=$(echo -n "$src|$dst" | $hasher | cut -d' ' -f1)
+    local params_hash=$(echo -n "$src|$dst|$partial|$head_size" | $hasher | cut -d' ' -f1)
 
     db="$tmp/presync-${params_hash}.sqlite3"
 
@@ -296,7 +309,6 @@ sync_target() {
 
     clear_line
 
-    # add progress here
     # print message regardless of verbosity level
     echo "Processing sources and presyncing..."
     print_msg "(Only files in need of reloaction are shown below)"
@@ -313,9 +325,14 @@ sync_target() {
         # verbose mode, show all files
         [[ "$verbose" = 1 ]] && info_msg "[${idx}/${total}]: $file"
 
-        hash=$($hasher "$file" | cut -d' ' -f1)
-        target="${file/#$src/$dst}"
+        # here hasher stderr for some reason is not messing inplace message display
+        if [[ "$partial" = 1 ]]; then
+            hash=$(head -c ${head_size}k $file | $hasher | cut -d' ' -f1)
+        else
+            hash=$($hasher "$file" | cut -d' ' -f1)
+        fi
 
+        target="${file/#$src/$dst}"
 
         [[ -f "$target" ]] && is_same_file "$target" "$hash" && continue
 
@@ -360,30 +377,79 @@ sync_target() {
 
     echo "Done!"
 
-    # debug
-    # db_query "select * from files;"
 }
 
 main() {
 
-    [ -z "$src" ] && show_help
+    local head_regex='[0-9]{2,}'
 
-    [[ ! -d "$src" || ! -r "$dst" ]] && error_exit "Source directory does not exist or is not readable!"
-    [[ ! -d "$dst" || ! -w "$dst" ]] && error_exit "Destination directory does not exist or is not writable!"
-    [[ ! -d "$tmp" || ! -w "$tmp" ]] && error_exit "Temp directory does not exist or is not writable!"
+    [ -z "${1:-}" ] && show_help
 
     command -v "sqlite3" > /dev/null || error_exit "The program \"sqlite3\" is required to store file hashess"
     command -v "$hasher" > /dev/null || error_exit "The program \"$hasher\" is required to process file hashess"
 
-    # options processing
-    [[ " $* " == *" --reuse-db "* ]] && reuse_db=1
-    [[ " $* " == *" --flush-db "* ]] && flush_db=1
-    [[ " $* " == *" --keep-db "* ]] && keep_db=1
-    [[ " $* " == *" --dry-run "* ]] && dry_run=1
-    [[ " $* " == *" --resume "* ]] && resume=1
-    [[ " $* " == *" --debug "* ]] && debug=1
-    [[ " $* " == *" --quiet "* ]] && quiet=1
-    [[ " $* " == *" --verbose "* ]] && verbose=1
+    while [ ${#} -gt 0 ] ; do
+        case "${1}" in
+
+            --debug|-d)
+                debug=1
+                ;;
+            --dry-run)
+                dry_run=1
+                ;;
+            --flush-db|-f)
+                flush_db=1
+                ;;
+            --help|-h)
+                show_help
+                ;;
+            --keep-db|-k)
+                keep_db=1
+                ;;
+            -p)
+                partial=1
+                info_msg "using $head_size head size"
+                ;;
+            --partial)
+                partial=1
+                head_size="${2:-${head_size}}"
+                [[ ! $head_size =~ $head_regex ]] && error_exit "Invalid head size paramater value: $head_size"
+                info_msg "using $head_size head size"
+                shift 1
+                ;;
+            --quiet|-q)
+                quiet=1
+                ;;
+            --resume)
+                resume=1
+                ;;
+            --reuse-db|-r)
+                reuse_db=1
+                ;;
+            --verbose|-v)
+                verbose=1
+                ;;
+            # Catch any unknown argument and stop processing
+            --*|-*)
+                error_exit "Unknown parameter: $1"
+                usage
+                ;;
+            *)
+                # Stop processing when we encounter a positional argument
+                break
+            ;;
+        esac
+        shift 1
+    done
+
+    src="${1:-}"
+    dst="${2:-}"
+
+    [[ "$#" -ne 2 ]] && error_exit "Missing source and target arguments."
+
+    [[ ! -d "$src" || ! -r "$dst" ]] && error_exit "Source directory does not exist or is not readable!"
+    [[ ! -d "$dst" || ! -w "$dst" ]] && error_exit "Destination directory does not exist or is not writable!"
+    [[ ! -d "$tmp" || ! -w "$tmp" ]] && error_exit "Temp directory does not exist or is not writable!"
 
     if [[ "$dry_run" = 1 ]]; then
         keep_db=1
