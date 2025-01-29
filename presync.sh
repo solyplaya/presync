@@ -36,20 +36,6 @@
 # as representing official policies, either expressed or implied, of anybody
 # else.
 
-# TODO:
-# x rework paramater parsing
-# x add support for partial file hashes with optional chunk size with param validation regex: head -c 1024k largefile | xxh128sum
-# - add usage information / documentation / license info
-# - add stats of actions done, specially useful for --quiet view
-# - log file option? (moved files and renamed files in the log)
-# x bring this to fossil-scm... it is growing a bit more than a one time use shell script for my file sync needs.
-# - add command to wipe all databases in temp dir. aka rm /tmp/presync-*.sqlite3
-# - move todo list to fossil
-# - refactor message printing
-#
-# For the DOCS:
-# Each database is associated to a source/destination folder combination and stored in tmp folder
-
 set -o nounset
 
 hasher="xxh128sum"
