@@ -2,6 +2,7 @@
 
 ### TODO
 
+- [ ] add option for --progress so it computes the total at the expense of double find command run. Caching should solve speed. test.
 - [ ] add usage information / documentation / license info
 - [ ] add stats of actions done, specially useful for `--quiet` view
 - [ ] log file option? (moved files and renamed files in the log)
