@@ -66,7 +66,11 @@ add_to_db() {
     local hash=$(get_hash_from_file "$file")
 
     # only add if we could read the file to compute the hash
-    [[ -n "$hash" ]] && db_query "INSERT OR REPLACE INTO files (hash, path) VALUES ('${hash//\'/\'\'}', '${file//\'/\'\'}');"
+    if [[ -n "$hash" ]]; then
+        db_query "INSERT OR REPLACE INTO files (hash, path) VALUES ('${hash//\'/\'\'}', '${file//\'/\'\'}');"
+    else
+        error_msg "Error: cannot generate checksum for file: $file"
+    fi
 
 }
 
@@ -205,17 +209,19 @@ get_hash_from_file() {
     local hash=""
     local hash_tmp=""
 
-    # xxh128sum messes inplace line display with output to stderr here
-    if [[ "$partial" = 1 ]]; then
-        hash_tmp=$(head -c ${head_size}k "$file" | $hasher 2>/dev/null)
-    else
-        hash_tmp=$($hasher "$file" 2>/dev/null)
+    if [ -r "$file" ]; then
+
+        # xxh128sum messes inplace line display with output to stderr here
+        if [[ "$partial" = 1 ]]; then
+            hash_tmp=$(head -c ${head_size}k "$file" | $hasher 2>/dev/null)
+        else
+            hash_tmp=$($hasher "$file" 2>/dev/null)
+        fi
+
+        # use regex instead of cut for edge cases of filenames with newline characters
+        [[ $hash_tmp =~ ^\\?([0-9a-f]+) ]] && hash="${BASH_REMATCH[1]}"
+
     fi
-
-    # use regex instead of cut for edge cases of filenames with newline characters
-    [[ $hash_tmp =~ ^\\?([0-9a-f]+) ]] && hash="${BASH_REMATCH[1]}"
-
-    [[ -z "$hash" ]] && error_msg "Error: cannot generate checksum for file: $file"
 
     echo -n "$hash"
 
