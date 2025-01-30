@@ -41,7 +41,7 @@ set -o nounset
 hasher="xxh128sum"
 tmp="/tmp"
 
-VERSION="1.0"
+VERSION="1.1"
 
 src=""
 dst=""
@@ -53,6 +53,7 @@ flush_db=0
 head_size=1024
 keep_db=0
 partial=0
+progress=0
 quiet=0
 resume=0
 reuse_db=0
@@ -62,22 +63,10 @@ verbose=0
 add_to_db() {
 
     local file="$1"
-    local hash=""
-    local path="${file}"
-
-    # xxh128sum messes inplace line display with output to stderr here
-    if [[ "$partial" = 1 ]]; then
-        hash=$(head -c ${head_size}k $file | $hasher 2>/dev/null | cut -d' ' -f1)
-    else
-        hash=$($hasher "$file" 2>/dev/null | cut -d' ' -f1)
-    fi
+    local hash=$(get_hash_from_file "$file")
 
     # only add if we could read the file to compute the hash
-    if [[ -n "$hash" ]]; then
-        db_query "INSERT OR REPLACE INTO files (hash, path) VALUES ('${hash//\'/\'\'}', '${path//\'/\'\'}');"
-    else
-        error_msg "Error: cannot generate checksum for file: $file"
-    fi
+    [[ -n "$hash" ]] && db_query "INSERT OR REPLACE INTO files (hash, path) VALUES ('${hash//\'/\'\'}', '${file//\'/\'\'}');"
 
 }
 
@@ -99,24 +88,20 @@ collect_target_hashes() {
 
     local file
     local idx=0
-    local IFS=$'\n'
     local files
     local total=0
     local resume_file=""
+    local progress_msg=""
 
     echo "Collecting target dir file checksums..."
 
-    files=$(find "$dst" -type f | sort)
-    total=$(wc -l <<< "$files")
+    [[ "$progress" = 1 ]] && total=$(get_total_files "$dst")
 
-    if [[ "$resume" = 1 ]]; then
-
-        resume_file=$(get_last_file)
-    fi
+    [[ "$resume" = 1 ]] && resume_file=$(get_last_file)
 
     # https://stackoverflow.com/questions/71270045/print-periodic-progress-messages-on-the-same-line
     # progress bar
-    for file in $files; do
+    while IFS= read -d '' -r file ; do
 
         (( idx++ ))
 
@@ -127,11 +112,13 @@ collect_target_hashes() {
             continue
         fi
 
-        inplace_msg "[${idx}/${total}] $file"
+        [[ "$progress" = 1 ]] && progress_msg="[${idx}/${total}] "
+
+        inplace_msg "${progress_msg}${file}"
 
         add_to_db "${file}"
 
-    done
+    done < <(find "$dst" -type f -print0)
 
 }
 
@@ -212,9 +199,44 @@ get_hash() {
 
 }
 
+get_hash_from_file() {
+
+    local file="$1"
+    local hash=""
+    local hash_tmp=""
+
+    # xxh128sum messes inplace line display with output to stderr here
+    if [[ "$partial" = 1 ]]; then
+        hash_tmp=$(head -c ${head_size}k "$file" | $hasher 2>/dev/null)
+    else
+        hash_tmp=$($hasher "$file" 2>/dev/null)
+    fi
+
+    # use regex instead of cut for edge cases of filenames with newline characters
+    [[ $hash_tmp =~ ^\\?([0-9a-f]+) ]] && hash="${BASH_REMATCH[1]}"
+
+    [[ -z "$hash" ]] && error_msg "Error: cannot generate checksum for file: $file"
+
+    echo -n "$hash"
+
+}
+
 get_path() {
 
     db_query "SELECT path FROM files WHERE hash = '${1//\'/\'\'}' AND used = 0 LIMIT 1;"
+}
+
+get_total_files() {
+
+    local total=0
+    local path="$1"
+
+    while IFS= read -r -d '' file; do
+        ((total++))
+    done < <(find "$path" -type f -print0)
+
+    echo -n "$total"
+
 }
 
 info_msg() {
@@ -235,6 +257,11 @@ inplace_msg() {
     local msg_left
     local msg_right
 
+    # replace newline characters with escaped representation for single line display
+    # msg="${msg//$'\n'/\\\\n}"
+
+    # for now replace inplace message new lines with a single space
+    msg="${msg//$'\n'/ }"
     clear_line
 
     if [ ${#msg} -gt $term_width ]; then
@@ -305,6 +332,7 @@ Options
 --keep-db, -k    don't delete database after running (ignores --flush-db)
 -p               same as --partial $head_size
 --partial SIZE   calc checksums using at most N kilobytes from file
+--progress       show progress of total files
 --quiet, -q      show less text output and use inplace progress messages
 --resume         resume from last record in database (implies --reuse-db)
 --reuse-db, -r   use an existing database of targets without asking
@@ -348,19 +376,15 @@ synchronize move collection on slow USB drive with huge files:
 
 sync_target() {
 
-    local hash
     local target
-
     local idx=0
-    local IFS=$'\n'
     local files
     local total=0
+    local progress_msg=""
 
-    # stats: totla files in source, total files in dest, total renamed files
+    # stats: total files in source, total files in dest, total renamed files
     #        total identcal files in same path, total files in source not in target
     #        total files in target not in source
-
-    local moved_files=0
 
     db_init
 
@@ -379,26 +403,26 @@ sync_target() {
     echo "Processing sources and presyncing..."
     print_msg "(Only files in need of reloaction are shown below)"
 
-    files=$(find "$src" -type f | sort)
-    total=$(wc -l <<< "$files")
+    [[ "$progress" = 1 ]] && total=$(get_total_files "$dst")
 
-    for file in $files; do
+    while IFS= read -r -d '' file; do
 
         (( idx++ ))
 
-        [[ "$quiet" = 1 ]] && inplace_msg "[${idx}/${total}] $file"
+        [[ "$progress" = 1 ]] && progress_msg="[${idx}/${total}] "
+
+        [[ "$quiet" = 1 ]] && inplace_msg "${progress_msg}${file}"
 
         # verbose mode, show all files
-        [[ "$verbose" = 1 ]] && info_msg "[${idx}/${total}]: $file"
+        [[ "$verbose" = 1 ]] && info_msg "${progress_msg}${file}"
 
-        # here hasher stderr for some reason is not messing inplace message display
-        if [[ "$partial" = 1 ]]; then
-            hash=$(head -c ${head_size}k $file | $hasher | cut -d' ' -f1)
-        else
-            hash=$($hasher "$file" | cut -d' ' -f1)
-        fi
-
+        hash=$(get_hash_from_file "$file")
         target="${file/#$src/$dst}"
+
+        if [[ -z "$hash" ]]; then
+            error_msg "Error: cannot generate checksum for file: $file"
+            continue
+        fi
 
         [[ -f "$target" ]] && is_same_file "$target" "$hash" && continue
 
@@ -408,7 +432,7 @@ sync_target() {
         if [[ -n "$existing_target" ]]; then
 
             # normal mode, show only files being processed
-            [[ "$verbose" = 0 ]] && info_msg "[${idx}/${total}]: $file"
+            [[ "$verbose" = 0 ]] && info_msg "${progress_msg}${file}"
 
             # Rename existing target with different content since we have a candidate to take its place.
             [[ -f "$target" ]] && rename_existing_target "$hash" "$target"
@@ -434,7 +458,7 @@ sync_target() {
 
         fi
 
-    done
+    done < <(find "$src" -type f -print0)
 
     if [[ "$debug" = 1 ]]; then
         notice_msg "\nList of collected target hashes after processing: (id, hash, path, used)"
@@ -483,6 +507,9 @@ main() {
                 [[ ! $head_size =~ $head_regex ]] && error_exit "Invalid head size paramater value: $head_size"
                 info_msg "using $head_size head size"
                 shift 1
+                ;;
+            --progress)
+                progress=1
                 ;;
             --quiet|-q)
                 quiet=1
