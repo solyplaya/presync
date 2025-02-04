@@ -41,7 +41,7 @@ set -o nounset
 hasher="xxh128sum"
 tmp="/tmp"
 
-VERSION="1.2"
+VERSION="1.3"
 
 readonly SHOW_FROM_DEBUG="5"
 readonly SHOW_FROM_VERBOSE="4"
@@ -55,6 +55,9 @@ readonly MSG_TYPE_INFO="info"
 readonly MSG_TYPE_WARNING="warning"
 readonly MSG_TYPE_NORMAL="normal"
 readonly MSG_TYPE_INPLACE="inplace"
+
+readonly TABLE_SOURCE="source"
+readonly TABLE_TARGET="target"
 
 src=""
 dst=""
@@ -74,12 +77,15 @@ verbosity="$SHOW_FROM_NORMAL"
 
 add_to_db() {
 
-    local file="$1"
+    local table="$1"
+    local file="$2"
+    local directory="${3/%\//}/"
+    local file_rel="${file/#$directory}"
     local hash=$(get_hash_from_file "$file")
 
     # only add if we could read the file to compute the hash
     if [[ -n "$hash" ]]; then
-        db_query "INSERT OR REPLACE INTO files (hash, path) VALUES ('${hash//\'/\'\'}', '${file//\'/\'\'}');"
+        db_query "INSERT OR REPLACE INTO $table (hash, path) VALUES ('${hash//\'/\'\'}', '${file_rel//\'/\'\'}');"
     else
         msg_error "Error: cannot generate checksum for file: $file"
     fi
@@ -96,11 +102,14 @@ cleanup_exit() {
 
 clear_line(){
 
-    echo -ne "\033[K"
+    [[ "$verbosity" -gt "$SHOW_FROM_MUTED" ]] && echo -ne "\033[K"
 
 }
 
-collect_target_hashes() {
+collect_hashes() {
+
+    local table="$1"
+    local directory="$2"
 
     local file
     local idx=0
@@ -110,10 +119,10 @@ collect_target_hashes() {
     local progress_msg=""
     local percent=""
 
-    msg "Collecting target dir file checksums..." "$SHOW_FROM_COMPACT"
+    msg "Collecting $table checksums..." "$SHOW_FROM_COMPACT"
 
-    [[ "$progress" = 1 ]] && total=$(get_total_files "$dst")
-    [[ "$resume" = 1 ]] && resume_file=$(get_last_file)
+    [[ "$progress" = 1 ]] && total=$(get_total_files "$directory")
+    [[ "$resume" = 1 ]] && resume_file=$(get_last_file "$table")
 
     while IFS= read -d '' -r file ; do
 
@@ -132,7 +141,7 @@ collect_target_hashes() {
         fi
 
         if [[ "$verbosity" -eq "$SHOW_FROM_QUIET" ]]; then
-            [[ "$progress" = 1 ]] && msg_inplace "Collecting target hashes: ${idx}/${total} (${percent}%)" "$SHOW_FROM_QUIET"
+            [[ "$progress" = 1 ]] && msg_inplace "Collecting $table checksums: ${idx}/${total} (${percent}%)" "$SHOW_FROM_QUIET"
         else
 
             if [[ ( "$verbosity" -eq "$SHOW_FROM_COMPACT" || "$verbosity" -eq "$SHOW_FROM_NORMAL" ) ]]; then
@@ -143,9 +152,21 @@ collect_target_hashes() {
 
         fi
 
-        add_to_db "${file}"
+        add_to_db "$table" "${file}" "${directory}"
 
-    done < <(find "$dst" -type f -print0)
+    done < <(find "$directory" -type f -print0)
+
+}
+
+collect_source_hashes() {
+
+    collect_hashes "$TABLE_SOURCE" "$src"
+
+}
+
+collect_target_hashes() {
+
+    collect_hashes "$TABLE_TARGET" "$dst"
 
 }
 
@@ -183,7 +204,13 @@ db_init() {
     fi
 
     db_query '
-CREATE TABLE files (
+CREATE TABLE source (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hash TEXT,
+    path TEXT,
+    used INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE target (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     hash TEXT,
     path TEXT,
@@ -199,6 +226,12 @@ db_query() {
 
 }
 
+db_query_ascii() {
+
+    echo "$1" | sqlite3 -ascii "$db" || error_exit "sqlite3 database query error!: $1"
+
+}
+
 error_exit() {
 
     msg_error "$1"
@@ -208,12 +241,9 @@ error_exit() {
 
 get_last_file(){
 
-    db_query "SELECT path FROM files ORDER BY id DESC LIMIT 1;"
-}
+    local table="$1"
 
-get_hash() {
-
-    db_query "SELECT hash FROM files WHERE path = '${1//\'/\'\'}' LIMIT 1;"
+    db_query "SELECT path FROM $table ORDER BY id DESC LIMIT 1;"
 
 }
 
@@ -241,9 +271,21 @@ get_hash_from_file() {
 
 }
 
-get_path() {
+get_target_path() {
 
-    db_query "SELECT path FROM files WHERE hash = '${1//\'/\'\'}' AND used = 0 LIMIT 1;"
+    db_query "SELECT path FROM target WHERE hash = '${1//\'/\'\'}' AND used = 0 LIMIT 1;"
+}
+
+get_unique_sources(){
+
+    db_query_ascii "SELECT s.hash, s.path FROM source s LEFT JOIN target t ON s.hash = t.hash AND s.path = t.path WHERE t.id IS NULL;"
+
+}
+
+get_unique_sources_count(){
+
+    db_query "SELECT COUNT(*) FROM source s LEFT JOIN target t ON s.hash = t.hash AND s.path = t.path WHERE t.id IS NULL;"
+
 }
 
 get_total_files() {
@@ -256,16 +298,6 @@ get_total_files() {
     done < <(find "$path" -type f -print0)
 
     echo -n "$total"
-
-}
-
-is_same_file() {
-
-    local file="${1}"
-    local source_hash="${2}"
-    local target_hash=$(get_hash "$file")
-
-    [[ "$source_hash" == "$target_hash" ]]
 
 }
 
@@ -461,10 +493,9 @@ msg_warning(){
 
 }
 
-rename_existing_target() {
+rename_conflicting_target() {
 
-    local hash="$1"
-    local file="$2"
+    local file="$1"
     local idx=1
     local new_name
     local target="${file%.*}_[renamed_${idx}].${file##*.}"
@@ -478,7 +509,7 @@ rename_existing_target() {
     msg_normal "Renaming existing target with different content: $file -> $target"
 
     # Rename and update only on success
-    [[ "$dry_run" = 0 ]] && mv "$file" "$target" && update_path "$file" "$target"
+    [[ "$dry_run" = 0 ]] && mv "$file" "$target" && update_target_path "$file" "$target"
 
 }
 
@@ -547,7 +578,9 @@ synchronize move collection on slow USB drive with huge files:
 sync_target() {
 
     local target
+    local row
     local idx=0
+    local file
     local files
     local total=0
     local progress_msg=""
@@ -561,26 +594,30 @@ sync_target() {
 
     if [[ "$reuse_db" = 0 || "$resume" = 1 ]]; then
         collect_target_hashes
+        clear_line
+        collect_source_hashes
     fi
 
     if [[ "$verbosity" -ge "$SHOW_FROM_DEBUG" ]]; then
         msg_info "\nList of collected target hashes before processing: (id, hash, path, used)"
-        msg_warning "$(db_query "select * from files;")\n"
+        msg_warning "$(db_query "select * from $TABLE_TARGET;")\n"
+        msg_info "\nList of collected source hashes before processing: (id, hash, path, used)"
+        msg_warning "$(db_query "select * from $TABLE_SOURCE;")\n"
     fi
 
     clear_line
 
-    msg "Processing sources and presyncing..." "$SHOW_FROM_COMPACT"
+    msg "Pre-syncing..." "$SHOW_FROM_COMPACT"
 
-    if [[ "$verbosity" -lt "$SHOW_FROM_VERBOSE" ]]; then
-        msg "(Only files in need of reloaction are shown below)" "$SHOW_FROM_COMPACT"
-    fi
+    [[ "$progress" = 1 ]] && total=$(get_unique_sources_count)
 
-    [[ "$progress" = 1 ]] && total=$(get_total_files "$src")
+    # fix verbosity crap
 
-    while IFS= read -r -d '' file; do
+    while IFS=$'\x1F' read -d $'\x1E' -ra row; do
 
         (( idx++ ))
+
+        file="${row[1]}"
 
         if [[ "$progress" = 1 ]]; then
             percent=$((idx * 100 / total))
@@ -592,20 +629,15 @@ sync_target() {
             msg_info "${progress_msg}${file}"
         fi
 
-        hash=$(get_hash_from_file "$file")
-        target="${file/#$src/$dst}"
+        hash="${row[0]}"
+        target="${dst}/${row[1]}"
 
-        if [[ -z "$hash" ]]; then
-            msg_error "Error: cannot generate checksum for file: $file"
-            continue
-        fi
-
-        [[ -f "$target" ]] && is_same_file "$target" "$hash" && continue
-
-        existing_target="$(get_path "$hash")"
+        existing_target="$(get_target_path "$hash")"
 
         # file exists in another path?
         if [[ -n "$existing_target" ]]; then
+
+            existing_target="$dst/$existing_target"
 
             case "$verbosity" in
                 "$SHOW_FROM_NORMAL") msg_info "${progress_msg}${file}" ;;
@@ -614,7 +646,7 @@ sync_target() {
             esac
 
             # Rename existing target with different content since we have a candidate to take its place.
-            [[ -f "$target" ]] && rename_existing_target "$hash" "$target"
+            [[ -f "$target" ]] && rename_conflicting_target "$target"
 
             # create intermediary folders as needed
             [[ "$dry_run" = 0 ]] && [[ ! -d "${target%/*}" ]] && mkdir -p "${target%/*}"
@@ -627,7 +659,7 @@ sync_target() {
 
                 if [ "$dry_run" = 0 ] && mv "$existing_target" "$target"; then
                     # update database entry so we don't create orphans
-                    update_path "$existing_target" "$target"
+                    update_target_path "$existing_target" "$target"
                 else
                     # msg_error could be skipped on dry_run
                     [[ "$dry_run" = 0 ]] && msg_error "Error: cannot move file!"
@@ -637,11 +669,11 @@ sync_target() {
 
         fi
 
-    done < <(find "$src" -type f -print0)
+    done < <(get_unique_sources)
 
     if [[ "$verbosity" -ge "$SHOW_FROM_DEBUG" ]]; then
         msg_info "\nList of collected target hashes after processing: (id, hash, path, used)"
-        msg_warning "$(db_query "select * from files;")\n"
+        msg_warning "$(db_query "select * from target;")\n"
     fi
 
     clear_line
@@ -649,12 +681,15 @@ sync_target() {
 
 }
 
-update_path() {
+update_target_path() {
 
     local old_path="$1"
     local new_path="$2"
+    local directory="${dst/%\//}/"
+    local old_path_rel="${old_path/#$directory}"
+    local new_path_rel="${new_path/#$directory}"
 
-    db_query "UPDATE files SET path='${new_path//\'/\'\'}', used=1  WHERE path='${old_path//\'/\'\'}';"
+    db_query "UPDATE target SET path='${new_path_rel//\'/\'\'}', used=1 WHERE path='${old_path_rel//\'/\'\'}';"
 
 }
 
