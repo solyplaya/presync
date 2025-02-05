@@ -173,7 +173,7 @@ collect_target_hashes() {
 db_init() {
 
     local response
-    local params_hash=$(echo -n "$src|$dst|$partial|$head_size" | $hasher | cut -d' ' -f1)
+    local params_hash=$(echo -n "$(realpath "$src")|$(realpath "$dst")|$partial|$head_size" | $hasher | cut -d' ' -f1)
 
     db="$tmp/presync-${params_hash}.sqlite3"
 
