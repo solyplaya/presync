@@ -522,7 +522,7 @@ BSD-2 license
 presync renames files in a backup to match a reorganized source folder enabling
 efficient synchronization with rsync without unnecessary file copying.
 
-Usage: presync [OPTION]... SRC DEST
+Usage: ${0##*/} [OPTION]... SRC DEST
 
 Options
 --compact, -c    show less text output and use inplace progress messages
@@ -558,7 +558,7 @@ its checksum. This could lead to some false file matchings in the event that
 various files share the same header data. Since no files are deleted or
 overwritten, any incorrectly reorganized files will get resolved by rsync.
 
-Database files are stored in /tmp/presync-[SOURCE|DEST|PARTIAL_SIZE].sqlite
+Database files are stored in /tmp/presync-[params checksum].sqlite
 and deleted after a successfull run unless --keep-db or --dry-run options are
 given.
 

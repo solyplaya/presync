@@ -3,7 +3,6 @@
 ### TODO
 
 - [ ] add main wiki page / readme.md documentation
-- [ ] tag versions in fossil
 - [ ] add stats of actions done, specially useful for `--compact` view
 - [ ] log file option? (moved files and renamed files in the log)
 - [ ] add command to wipe all databases in temp dir. aka `rm /tmp/presync-*.sqlite3`
@@ -12,6 +11,7 @@
 
 ### DONE
 
+- [x] tag versions in fossil
 - [x] consider caching source checksums when using `--dry-run`
 - [x] refactor message printing
 - [x] add option to disable colors `--no-color`
