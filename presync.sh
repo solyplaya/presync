@@ -506,10 +506,10 @@ rename_conflicting_target() {
 show_help() {
 
     echo "presync version $VERSION Copyright (c) 2025 Francisco Gonzalez
-BSD-2 license
+MIT license
 
-presync renames files in a backup to match a reorganized source folder enabling
-efficient synchronization with rsync without unnecessary file copying.
+presync renames files in target folder to match existing files in source folder
+based on content checksums.
 
 Usage: ${0##*/} [OPTION]... SRC DEST
 
