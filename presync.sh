@@ -530,7 +530,7 @@ Options
 --reuse-db, -r   use an existing database of targets without asking
 --verbose, -v    increase verbosity
 
-presyn does not copy or delete any files, only renames existing files in the
+presync does not copy or delete any files, only renames existing files in the
 destination directory based on content hash to prevent unnecessary file copying
 on rsync (or similar) command run.
 

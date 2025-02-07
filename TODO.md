@@ -2,6 +2,7 @@
 
 ### TODO
 
+- [ ] get rid of .sh in presync.sh
 - [ ] add option to prune empty dirs not existing in source
 - [ ] add main wiki page / readme.md documentation
 - [ ] add stats of actions done, specially useful for `--compact` view
