@@ -70,7 +70,9 @@ add_to_db() {
     local file="$2"
     local directory="${3/%\//}/"
     local file_rel="${file/#$directory}"
-    local hash=$(get_hash_from_file "$file")
+    local hash
+
+    hash=$(get_hash_from_file "$file")
 
     # only add if we could read the file to compute the hash
     if [[ -n "$hash" ]]; then
@@ -102,7 +104,6 @@ collect_hashes() {
 
     local file
     local idx=0
-    local files
     local total=0
     local resume_file=""
     local progress_msg=""
@@ -162,7 +163,9 @@ collect_target_hashes() {
 db_init() {
 
     local response
-    local params_hash=$(echo -n "$(realpath "$src")|$(realpath "$dst")|$partial|$head_size" | $hasher | cut -d' ' -f1)
+    local params_hash
+
+    params_hash=$(echo -n "$(realpath "$src")|$(realpath "$dst")|$partial|$head_size" | $hasher | cut -d' ' -f1)
 
     db="$tmp/presync-${params_hash}.sqlite3"
 
@@ -174,7 +177,7 @@ db_init() {
 
         if [[ "$flush_db" = 0 && "$reuse_db" = 0 ]]; then
 
-            read -p "A database from a previous run already exists, reuse? (y/N): " response
+            read -r -p "A database from a previous run already exists, reuse? (y/N): " response
 
             if [[ "${response,,}" = "y" || "${response,,}" = "yes" ]]; then
                 reuse_db=1
@@ -246,7 +249,7 @@ get_hash_from_file() {
 
         # xxh128sum messes inplace line display with output to stderr here
         if [[ "$partial" = 1 ]]; then
-            hash_tmp=$(head -c ${head_size}k "$file" | $hasher 2>/dev/null)
+            hash_tmp=$(head -c "${head_size}"k "$file" | $hasher 2>/dev/null)
         else
             hash_tmp=$($hasher "$file" 2>/dev/null)
         fi
@@ -326,7 +329,7 @@ main() {
             --no-color|-n)
                 no_color=1
                 ;;
-            -p)
+            -P)
                 partial=1
                 msg_info "using $head_size head size"
                 ;;
@@ -354,7 +357,6 @@ main() {
                 ;;
             --*|-*)
                 error_exit "Unknown parameter: $1"
-                usage
                 ;;
             *)
                 # Stop processing when we encounter a positional argument
@@ -436,7 +438,7 @@ msg() {
         msg="${msg//$'\n'/ }"
         clear_line
 
-        if [ ${#msg} -gt $term_width ]; then
+        if [ ${#msg} -gt "$term_width" ]; then
             max_len=$((term_width - 5))
             msg_left=$((max_len / 2))
             msg_right=$((max_len - msg_left))
@@ -486,7 +488,6 @@ rename_conflicting_target() {
 
     local file="$1"
     local idx=1
-    local new_name
     local target="${file%.*}_[renamed_${idx}].${file##*.}"
 
     while [ -f  "$target" ]; do
@@ -570,7 +571,6 @@ sync_target() {
     local row
     local idx=0
     local file
-    local files
     local total=0
     local progress_msg=""
     local percent=""
