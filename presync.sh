@@ -514,7 +514,7 @@ based on content checksums.
 Usage: ${0##*/} [OPTION]... SRC DEST
 
 Options
---compact, -c    show less text output and use inplace progress messages
+--compact, -c    show less text output and use in-place progress messages
 --debug, -d      dumps database of targets before / after processing
 --dry-run        trial run without file changes (implies --keep-db)
 --flush-db, -f   remove any existing db without asking
@@ -525,7 +525,7 @@ Options
 -P               same as --partial $head_size
 --partial SIZE   calc checksums using at most N kilobytes from file
 --progress, -p   show progress of total files
---quiet, -q      show only inplace progress messages
+--quiet, -q      show only in-place progress messages
 --resume         resume from last record in database (implies --reuse-db)
 --reuse-db, -r   use an existing database of targets without asking
 --verbose, -v    increase verbosity
@@ -542,13 +542,13 @@ rsync program run.
 On conflicts existing files get renamed to filename_[renamed_1].ext
 
 Using the --partial argument you can speed up the synchronization process since
-only a smaller amount of data from the begining of each file is used to calc
+only a smaller amount of data from the beginning of each file is used to calc
 its checksum. This could lead to some false file matchings in the event that
 various files share the same header data. Since no files are deleted or
 overwritten, any incorrectly reorganized files will get resolved by rsync.
 
 Database files are stored in /tmp/presync-[params checksum].sqlite
-and deleted after a successfull run unless --keep-db or --dry-run options are
+and deleted after a successful run unless --keep-db or --dry-run options are
 given.
 
 Example usage:
@@ -556,7 +556,7 @@ Example usage:
 synchronize renamed files in backup
     presync /home/user/Pictures /media/backup/Pictures
 
-synchronize move collection on slow USB drive with huge files:
+synchronize movies collection on slow USB drive with huge files:
     presync --partial 2048 --keep-db /media/movies /media/movies_backup
 
 "
