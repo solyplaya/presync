@@ -2,6 +2,7 @@
 
 ### TODO
 
+- [ ] add option to prune empty dirs not existing in source
 - [ ] add main wiki page / readme.md documentation
 - [ ] add stats of actions done, specially useful for `--compact` view
 - [ ] log file option? (moved files and renamed files in the log)
