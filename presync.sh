@@ -30,7 +30,7 @@ set -o nounset
 hasher="xxh128sum"
 tmp="/tmp"
 
-VERSION="1.4"
+VERSION="1.5"
 
 readonly SHOW_FROM_DEBUG="5"
 readonly SHOW_FROM_VERBOSE="4"
@@ -452,6 +452,9 @@ msg() {
             msg_right=$((max_len - msg_left))
             msg="${msg:0:$msg_left}...${msg: -$msg_right}"
         fi
+
+        # escape backslashes
+        msg="${msg//\\/\\\\}"
 
         flag_n="-n"
         post_msg="\r"
