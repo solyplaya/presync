@@ -2,17 +2,18 @@
 
 ### TODO
 
-- [ ] get rid of .sh in presync.sh
+- [ ] create a posix compliant version for extended compatibility
 - [ ] add option to prune empty dirs not existing in source
-- [ ] add main wiki page / readme.md documentation
 - [ ] add stats of actions done, specially useful for `--compact` view
 - [ ] log file option? (moved files and renamed files in the log)
 - [ ] add command to wipe all databases in temp dir. aka `rm /tmp/presync-*.sqlite3`
-- [ ] add test suite
+- [ ] add test suite, including cross platform tests
 - [ ] consider this progress bar: https://github.com/pollev/bash_progress_bar
 
 ### DONE
 
+- [x] get rid of .sh in presync.sh
+- [x] add main wiki page / readme.md documentation
 - [x] tag versions in fossil
 - [x] consider caching source checksums when using `--dry-run`
 - [x] refactor message printing
