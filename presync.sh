@@ -50,7 +50,7 @@ readonly TABLE_TARGET="target"
 
 src=""
 dst=""
-db="${tmp}/presync.sqlite3"
+db=""
 
 dry_run=0
 flush_db=0
@@ -165,9 +165,10 @@ db_init() {
     local response
     local params_hash
 
-    params_hash=$(echo -n "$(realpath "$src")|$(realpath "$dst")|$partial|$head_size" | $hasher | cut -d' ' -f1)
-
-    db="$tmp/presync-${params_hash}.sqlite3"
+    if [[ -z "$db" ]]; then
+        params_hash=$(echo -n "$(realpath "$src")|$(realpath "$dst")|$partial|$head_size" | $hasher | cut -d' ' -f1)
+        db="$tmp/presync-${params_hash}.sqlite3"
+    fi
 
     # new db on each run onless resue specified
     if [ -f "$db" ]; then
@@ -305,6 +306,13 @@ main() {
     while [ ${#} -gt 0 ] ; do
         case "${1}" in
 
+            --database|-d)
+                db="${2:-}"
+                if ! (touch "$db" 2>/dev/null && [[ -w "$db" ]]); then
+                    error_exit "Cannot create database: $db"
+                fi
+                shift 1
+                ;;
             --compact|-c)
                 verbosity="$SHOW_FROM_COMPACT"
                 ;;
@@ -373,7 +381,7 @@ main() {
 
     [[ ! -d "$src" || ! -r "$dst" ]] && error_exit "Source directory does not exist or is not readable!"
     [[ ! -d "$dst" || ! -w "$dst" ]] && error_exit "Destination directory does not exist or is not writable!"
-    [[ ! -d "$tmp" || ! -w "$tmp" ]] && error_exit "Temp directory does not exist or is not writable!"
+    [[ -z "$db" ]] && [[ ! -d "$tmp" || ! -w "$tmp" ]] && error_exit "Temp directory does not exist or is not writable!"
 
     # prevent long inplace messages from cluttering the terminal window
     term_width=$(tput cols)
@@ -515,6 +523,7 @@ based on content checksums.
 Usage: ${0##*/} [OPTION]... SRC DEST
 
 Options
+--database FILE  write the database to the specified FILE
 --compact, -c    show less text output and use in-place progress messages
 --debug, -d      dumps database of targets before / after processing
 --dry-run        trial run without file changes (implies --keep-db)
@@ -550,7 +559,8 @@ overwritten, any incorrectly reorganized files will get resolved by rsync.
 
 Database files are stored in /tmp/presync-[params checksum].sqlite
 and deleted after a successful run unless --keep-db or --dry-run options are
-given.
+given. You can specify a custom database file location in case /tmp is not a
+writable path in your system.
 
 Example usage:
 
