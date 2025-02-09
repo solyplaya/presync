@@ -1,7 +1,7 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# PreSync - renames files in target folder to match existing files in source
-# folder based on content checksums.
+# PreSync (bash version) - renames files in target folder to match existing
+# files in source folder based on content checksums.
 #
 # MIT License
 #
@@ -336,7 +336,7 @@ main() {
             --partial)
                 partial=1
                 head_size="${2:-${head_size}}"
-                [[ ! $head_size =~ $head_regex ]] && error_exit "Invalid head size paramater value: $head_size"
+                [[ ! $head_size =~ $head_regex ]] && error_exit "Invalid head size parameter value: $head_size"
                 msg_info "using $head_size head size"
                 shift 1
                 ;;
@@ -506,7 +506,7 @@ rename_conflicting_target() {
 
 show_help() {
 
-    echo "presync version $VERSION Copyright (c) 2025 Francisco Gonzalez
+    echo "presync (bash) version $VERSION Copyright (c) 2025 Francisco Gonzalez
 MIT license
 
 presync renames files in target folder to match existing files in source folder
@@ -600,8 +600,6 @@ sync_target() {
 
     [[ "$progress" = 1 ]] && total=$(get_unique_sources_count)
 
-    # fix verbosity crap
-
     while IFS=$'\x1F' read -d $'\x1E' -ra row; do
 
         (( idx++ ))
@@ -631,7 +629,7 @@ sync_target() {
             case "$verbosity" in
                 "$SHOW_FROM_NORMAL") msg_info "${progress_msg}${file}" ;;
                 "$SHOW_FROM_COMPACT") msg_inplace "${progress_msg}${file}" ;;
-                "$SHOW_FROM_QUIET") [[ "$progress" = 1 ]] && msg_inplace "Collecting source hashes and processing: ${idx}/${total} (${percent}%)" "$SHOW_FROM_QUIET" ;;
+                "$SHOW_FROM_QUIET") [[ "$progress" = 1 ]] && msg_inplace "${idx}/${total} (${percent}%)" "$SHOW_FROM_QUIET" ;;
             esac
 
             # Rename existing target with different content since we have a candidate to take its place.
