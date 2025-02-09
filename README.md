@@ -10,38 +10,41 @@ To install `presync`, follow these simple steps:
 
 1. **Dependencies**
 
+- `bash` - GNU Bourne Again SHell. Website: [bash](https://www.gnu.org/software/bash/)
 - `sqlite3`: A command-line interface for SQLite databases. Website: [sqlite](https://sqlite.org/)
 - `xxhash`: command-line tool for computing a fast non-cryptographic checksum. Website: [xxhash](https://github.com/Cyan4973/xxHash)
 
 You can install these dependencies using your system's package manager. For example, on Ubuntu/Debian:
 
 ```bash
-sudo apt-get install sqlite3 xxhash
+sudo apt-get install bash sqlite3 xxhash
 ```
 
 2. **Download the script**
 
-   You can download the `presync` script from the repository:
+   You can download the `presync.sh` script from the repository:
 
 ```bash
-wget https://github.com/githubusername/presync/raw/main/presync
+wget https://github.com/githubusername/presync/raw/main/presync.sh
 ```
 
 3. **Make the script executable**
 
 Grant execution permissions to the script:
 
-`chmod +x presync`
+`chmod +x presync.sh`
 
 4. **Move the script to a directory in your PATH**
 
 To make the script easily accessible from anywhere, move it to a directory included in your system's `PATH` (e.g., `/usr/local/bin` for system-wide use or `~/bin` for user-specific use):
 
 ```bash
-sudo mv presync /usr/local/bin/   # System-wide
+sudo mv presync.sh /usr/local/bin/presync   # System-wide
 # or
-mv presync ~/bin/                 # User-specific
+mv presync.sh ~/bin/presync                 # User-specific
 ```
+
+Notice that this installs `presync` executable without the `.sh` extension.
 
 If you choose to use a user-specific directory like `~/bin`, ensure it's added to your `PATH` by adding the following to your `~/.bashrc` or `~/.bash_profile`:
 
@@ -152,7 +155,7 @@ presync --dry-run src dst
 Interrupt processing with `ctrl+c` at any time, then to continue from the last processed file:
 
 ```bash
-presyn.sh --resume src dst
+presyncS --resume src dst
 ```
 
 If you run presync without `--resume` and it encounters a database file from a previous run, it will ask you wheter you want to reuse it or not. Have that into account if you are using `--muted` option for your batch or cron scripts. For that matter you have the `--resume`, `--reuse-db` and `--flush-db` options available.
