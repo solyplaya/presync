@@ -8,19 +8,19 @@ presync does not copy or delete any files, only renames existing files in the de
 
 To install `presync`, follow these simple steps:
 
-1. **Dependencies**
+### Dependencies
 
-- `bash` - GNU Bourne Again SHell. Website: [bash](https://www.gnu.org/software/bash/)
-- `sqlite3`: A command-line interface for SQLite databases. Website: [sqlite](https://sqlite.org/)
-- `xxhash`: command-line tool for computing a fast non-cryptographic checksum. Website: [xxhash](https://github.com/Cyan4973/xxHash)
+    - `bash` - GNU Bourne Again SHell. Website: [bash](https://www.gnu.org/software/bash/)
+    - `sqlite3`: A command-line interface for SQLite databases. Website: [sqlite](https://sqlite.org/)
+    - `xxhash`: command-line tool for computing a fast non-cryptographic checksum. Website: [xxhash](https://github.com/Cyan4973/xxHash)
 
-You can install these dependencies using your system's package manager. For example, on Ubuntu/Debian:
+    You can install these dependencies using your system's package manager. For example, on Ubuntu/Debian:
 
 ```bash
 sudo apt-get install bash sqlite3 xxhash
 ```
 
-2. **Download the script**
+### Download the script
 
    You can download the `presync.sh` script from the repository:
 
@@ -28,13 +28,13 @@ sudo apt-get install bash sqlite3 xxhash
 wget https://github.com/githubusername/presync/raw/main/presync.sh
 ```
 
-3. **Make the script executable**
+### Make the script executable
 
 Grant execution permissions to the script:
 
 `chmod +x presync.sh`
 
-4. **Move the script to a directory in your PATH**
+### Move the script to a directory in your PATH
 
 To make the script easily accessible from anywhere, move it to a directory included in your system's `PATH` (e.g., `/usr/local/bin` for system-wide use or `~/bin` for user-specific use):
 
@@ -52,7 +52,7 @@ If you choose to use a user-specific directory like `~/bin`, ensure it's added t
 export PATH=$PATH:~/bin
 ```
 
-4. **Verify installation**
+### Verify installation
 
 Check that the script is installed correctly by running:
 
