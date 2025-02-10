@@ -25,7 +25,7 @@ sudo apt-get install bash sqlite3 xxhash
    You can download the `presync.sh` script from the repository:
 
 ```bash
-wget https://github.com/githubusername/presync/raw/main/presync.sh
+wget https://raw.githubusercontent.com/solyplaya/presync/master/presync.sh
 ```
 
 ### Make the script executable
