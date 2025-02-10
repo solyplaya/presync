@@ -2,8 +2,12 @@
 
 ### TODO
 
+- [ ] review proper exit on error in subshell (add_to_db)
+- [ ] add prune dirs option to posix version
+- [ ] make configurable tmp dir via param
+- [ ] make configurable hasher command via param
 - [ ] create a posix compliant version for extended compatibility
-- [ ] add option to prune empty dirs not existing in source
+- [ ] add option to prune empty dirs (not existing in source)
 - [ ] add stats of actions done, specially useful for `--compact` view
 - [ ] log file option? (moved files and renamed files in the log)
 - [ ] add command to wipe all databases in temp dir. aka `rm /tmp/presync-*.sqlite3`
