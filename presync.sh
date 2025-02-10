@@ -510,7 +510,7 @@ rename_conflicting_target() {
     msg_normal "Renaming existing target with different content: $file -> $target"
 
     # Rename and update only on success
-    [[ "$dry_run" = 0 ]] && mv "$file" "$target" && update_target_path "$file" "$target"
+    [[ "$dry_run" = 0 ]] && mv "$file" "$target" && update_conflicting_target "$file" "$target"
 
 }
 
@@ -659,7 +659,7 @@ sync_target() {
 
                 if [ "$dry_run" = 0 ] && mv "$existing_target" "$target"; then
                     # update database entry so we don't create orphans
-                    update_target_path "$existing_target" "$target"
+                    update_used_target "$existing_target" "$target"
                 else
                     # msg_error could be skipped on dry_run
                     [[ "$dry_run" = 0 ]] && msg_error "Error: cannot move file!"
@@ -681,15 +681,32 @@ sync_target() {
 
 }
 
+update_conflicting_target() {
+
+    # update only target path
+    update_target_path "$1" "$2" "0"
+
+}
+
 update_target_path() {
 
     local old_path="$1"
     local new_path="$2"
+    local maybe_used=""
+    [ "${3:-}" -eq 1 ] && maybe_used=", used=1"
+
     local directory="${dst/%\//}/"
     local old_path_rel="${old_path/#$directory}"
     local new_path_rel="${new_path/#$directory}"
 
-    db_query "UPDATE target SET path='${new_path_rel//\'/\'\'}', used=1 WHERE path='${old_path_rel//\'/\'\'}';"
+    db_query "UPDATE target SET path='${new_path_rel//\'/\'\'}' $maybe_used WHERE path='${old_path_rel//\'/\'\'}';"
+
+}
+
+update_used_target() {
+
+    # update target path and used status
+    update_target_path "$1" "$2" "1"
 
 }
 
