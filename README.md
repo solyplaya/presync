@@ -10,11 +10,11 @@ To install `presync`, follow these simple steps:
 
 ### Dependencies
 
-    - `bash` - GNU Bourne Again SHell. Website: [bash](https://www.gnu.org/software/bash/)
-    - `sqlite3`: A command-line interface for SQLite databases. Website: [sqlite](https://sqlite.org/)
-    - `xxhash`: command-line tool for computing a fast non-cryptographic checksum. Website: [xxhash](https://github.com/Cyan4973/xxHash)
+- `bash` - GNU Bourne Again SHell. Website: [bash](https://www.gnu.org/software/bash/)
+- `sqlite3`: A command-line interface for SQLite databases. Website: [sqlite](https://sqlite.org/)
+- `xxhash`: command-line tool for computing a fast non-cryptographic checksum. Website: [xxhash](https://github.com/Cyan4973/xxHash)
 
-    You can install these dependencies using your system's package manager. For example, on Ubuntu/Debian:
+You can install these dependencies using your system's package manager. For example, on Ubuntu/Debian:
 
 ```bash
 sudo apt-get install bash sqlite3 xxhash
