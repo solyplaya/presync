@@ -155,7 +155,7 @@ presync --dry-run src dst
 Interrupt processing with `ctrl+c` at any time, then to continue from the last processed file:
 
 ```bash
-presyncS --resume src dst
+presync --resume src dst
 ```
 
 If you run presync without `--resume` and it encounters a database file from a previous run, it will ask you wheter you want to reuse it or not. Have that into account if you are using `--muted` option for your batch or cron scripts. For that matter you have the `--resume`, `--reuse-db` and `--flush-db` options available.
