@@ -318,19 +318,14 @@ msg() {
 
 prune_dirs() {
 
-    for dir in */; do
+    find "$dst" -type d -empty | while IFS= read -r dir; do
 
-        [ -d "$dir" ] || continue
+        # Check if dir path starts with directory as mitigation to filenames with new line characters
+        if [ "${dir#"$dst"}" != "$dir" ] && [ -d "$dir" ]; then
 
-        # change dir in a subshell
-        #@TODO: test subshell not needed here since execution ends soon after this point
-        (cd "$dir" && prune_dirs)
+            # only prune empty dir if it does not exist in src folder
+            [ ! -d "${src}${dir#"$dst"}" ] && rmdir "$dir" 2>/dev/null
 
-        # if dir is empty...
-        if [ -z "$(ls -A "$dir")" ]; then
-            msg "$dir"
-            # @TODO: only prune this dir if it does not exist in source folder
-            rmdir "$dir" 2>/dev/null
         fi
 
     done
@@ -478,10 +473,12 @@ sync_target() {
         rm "$tmp/presync.source" "$tmp/presync.target"
     fi
 
-    if [ "$prune_dirs" -eq 1 ]; then
+    # check if dst is not empty first
+    if [ "$prune_dirs" -eq 1 ] && [ -n "$(ls -A "$dst")" ]; then
         msg; msg "Deleting empty dirs in target..."
         # run in a subshell to keep cwd after execution
-        (cd "$dst" && prune_dirs)
+        # (cd "$dst" && prune_dirs)
+        prune_dirs
     fi
 
     msg; msg "Done!"
