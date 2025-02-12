@@ -25,14 +25,17 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-hasher="xxh128sum"
-
-VERSION="1.0"
+VERSION="1.1"
+TARGET_USED="1"
+TARGET_CONFLICT="0"
 src=""
 dst=""
-db="/tmp/presync.sqlite3"
+db=""
+hasher=""
 head_size=0
 muted=0
+prune_dirs=0
+tmp="/tmp"
 
 add_to_db() {
 
@@ -44,7 +47,14 @@ add_to_db() {
     hash=$(get_hash_from_file "$file")
 
     if [ -n "$hash" ]; then
-        db_query "INSERT OR REPLACE INTO $table (hash, path) VALUES ('$(escape_single_quotes "$hash")', '$(escape_single_quotes "$file_rel")');"
+
+        if [ -n "$db" ]; then
+            db_query "INSERT OR REPLACE INTO $table (hash, path) VALUES ('$(escape_single_quotes "$hash")', '$(escape_single_quotes "$file_rel")');"
+        else
+            # be ware of special chars and interpretation of backslashes
+            echo "$hash|$file_rel" >> "$tmp/presync.$table"
+        fi
+
     else
         msg "Error: cannot generate checksum for file: $file"
     fi
@@ -74,6 +84,7 @@ collect_hashes() {
 
 db_init() {
 
+    [ -z "$db" ] && return
     [ -f "$db" ] && rm "$db"
 
     db_query '
@@ -149,29 +160,76 @@ get_hash_from_file() {
 
 get_target_path() {
 
-    db_query "SELECT path FROM target WHERE hash = '$(escape_single_quotes "$1")' AND used = 0 LIMIT 1;"
+    if [ -n "$db" ]; then
+        db_query "SELECT path FROM target WHERE hash = '$(escape_single_quotes "$1")' AND used = 0 LIMIT 1;"
+    else
+        cat "$tmp/presync.target" | grep -m 1 "$1" | cut -d '|' -f 2-
+    fi
+
 }
 
 get_unique_sources(){
 
-    db_query "SELECT s.hash, s.path FROM source s LEFT JOIN target t ON s.hash = t.hash AND s.path = t.path WHERE t.id IS NULL;"
+    if [ -n "$db" ]; then
+        db_query "SELECT s.hash, s.path FROM source s LEFT JOIN target t ON s.hash = t.hash AND s.path = t.path WHERE t.id IS NULL;"
+    else
+        sort "$tmp/presync.source" > "$tmp/presync.source.sorted"
+        sort "$tmp/presync.target" > "$tmp/presync.target.sorted"
+        comm -23 "$tmp/presync.source.sorted" "$tmp/presync.target.sorted" > "$tmp/presync.source.unique"
+        comm -13 "$tmp/presync.source.sorted" "$tmp/presync.target.sorted" > "$tmp/presync.target.unique"
+        rm "$tmp/presync.source.sorted" "$tmp/presync.target.sorted" "$tmp/presync.source" "$tmp/presync.target"
+        mv "$tmp/presync.source.unique" "$tmp/presync.source"
+        mv "$tmp/presync.target.unique" "$tmp/presync.target"
+
+        cat "$tmp/presync.source"
+    fi
+
+}
+
+have_command(){
+
+    command -v "$1" > /dev/null
 
 }
 
 main() {
 
+    _custom_db=""
+
     [ -z "${1:-}" ] && show_help
 
-    command -v "sqlite3" > /dev/null || error_exit "The program \"sqlite3\" is required to store file hashess"
-    command -v "$hasher" > /dev/null || error_exit "The program \"$hasher\" is required to process file hashess"
+    if ! (have_command "sqlite3"); then
+
+        for cmd in comm cat cut find grep sed sort; do
+            ! (have_command "$cmd") && error_exit "Error: presync requires $cmd command to run in plaintext mode."
+        done
+
+        msg "Notice: command sqlite3 not found - using slower plain text mode"
+    else
+        db="/tmp/presync.sqlite3"
+    fi
 
     while [ $# -gt 0 ] ; do
         case "$1" in
 
-            --database|-d)
-                db="${2:-}"
-                if ! (touch "$db" 2>/dev/null && [ -w "$db" ]); then
-                    error_exit "Cannot create database: $db"
+            --database)
+                if [ -n "$db" ]; then
+                    _custom_db="${2:-}"
+                    if ! (touch "$_custom_db" 2>/dev/null && [ -w "$_custom_db" ]); then
+                        error_exit "Cannot create database: $_custom_db"
+                    fi
+                fi
+                shift
+                ;;
+            --tmp)
+                tmp="${2:-}"
+                shift
+                ;;
+            --hasher)
+                if have_command "${2:-}"; then
+                    hasher="$2"
+                else
+                    error_exit "Error: custom hasher '${2:-}' is not a valid command"
                 fi
                 shift
                 ;;
@@ -187,6 +245,9 @@ main() {
                     error_exit "Invalid head size parameter value: $head_size"
                 fi
                 shift
+                ;;
+            --prune-dirs)
+                prune_dirs=1
                 ;;
             --*|-*)
                 error_exit "Unknown parameter: $1"
@@ -211,10 +272,38 @@ main() {
         error_exit "Destination directory does not exist or is not writable!"
     fi
 
-    touch "$db" 2>/dev/null
+    if [ -n "$db" ]; then
 
-    if [ ! -w "$db" ]; then
-        error_exit "Cannot write database file: $db"
+        if [ -n "$_custom_db" ]; then
+            db="$_custom_db"
+        else
+            touch "$db" 2>/dev/null
+
+            if [ ! -w "$db" ]; then
+                error_exit "Cannot write database file: $db"
+            fi
+        fi
+
+    else
+        # plain text mode needs write permission to tmp dir
+        [[ ! -d "$tmp" || ! -w "$tmp" ]] && error_exit "Temp directory '$tmp' does not exist or is not writable!"
+        rm "$tmp/presync.source" "$tmp/presync.target" 2>/dev/null
+    fi
+
+    # try to find an available hasher
+    if [ -z "$hasher" ]; then
+
+        # test b2sum and cksum
+        for cmd in xxh128sum sha1sum md5sum md5; do
+            if have_command "$cmd"; then
+                hasher="$cmd"
+                [ "$hasher" != "xxh128sum" ] && msg "Notice: command xxh128sum not found - using slower hasher $hasher"
+                break
+            fi
+        done
+
+        [ -z "$hasher" ] && error_exit "Error: no checksum calculation program found. Use a custom command with option --hasher."
+
     fi
 
     sync_target
@@ -227,18 +316,51 @@ msg() {
 
 }
 
+prune_dirs() {
+
+    for dir in */; do
+
+        [ -d "$dir" ] || continue
+
+        # change dir in a subshell
+        #@TODO: test subshell not needed here since execution ends soon after this point
+        (cd "$dir" && prune_dirs)
+
+        # if dir is empty...
+        if [ -z "$(ls -A "$dir")" ]; then
+            msg "$dir"
+            # @TODO: only prune this dir if it does not exist in source folder
+            rmdir "$dir" 2>/dev/null
+        fi
+
+    done
+
+}
+
 rename_conflicting_target() {
 
     _file="$1"
+    _dir="${dst%/}/"
     _idx=1
     _target="${_file%.*}_[renamed_${_idx}].${_file##*.}"
+    _hash=""
 
     while [ -f  "$_target" ]; do
         _idx=$((_idx+1))
         _target="${_file%.*}_[renamed_${_idx}].${_file##*.}"
     done
 
-    mv "$_file" "$_target" && update_target_path "$_file" "$_target"
+    if mv "$_file" "$_target"; then
+
+        if [ -z "$db" ]; then
+            _file_rel="${_file#"$_dir"}"
+            _hash=$(cat "$tmp/presync.target" | grep -m 1 -F "$_file_rel" | cut -d '|' -f 1)
+        fi
+
+        # hash is only required in non db mode here
+        update_target_path "$_file" "$_target" "$_hash" "$TARGET_CONFLICT"
+
+    fi
 
 }
 
@@ -254,9 +376,12 @@ Usage: ${0##*/} [OPTION]... SRC DEST
 
 Options
 --database FILE  write the database to the specified FILE
+--hasher CMD     use the given CMD to process file checksums
 --help, -h       show this help
 --muted, -m      don't output any text
 --partial SIZE   calc checksums using at most N kilobytes from file
+--prune-dirs     delete empty diretories left in target after processing
+--tmp DIR        path to writable temp directory
 
 presync does not copy or delete any files, only renames existing files in the
 destination directory based on content hash to prevent unnecessary file copying
@@ -264,8 +389,8 @@ on rsync (or similar) command run.
 
 presync only considers files, so if you rename a folder src/A to src/B,
 the script will move all the files in dst/A to dst/B one by one, instead of
-renaming the folder. Empty folders left behind are there to be deleted by your
-rsync program run.
+renaming the folder. Empty folders left in target after processing can be
+deleted if passing the --prune-dirs option.
 
 On conflicts existing files get renamed to filename_[renamed_1].ext
 
@@ -276,8 +401,8 @@ various files share the same header data. Since no files are deleted or
 overwritten, any incorrectly reorganized files will get resolved by rsync.
 
 Database files are stored in /tmp/presync.sqlite and deleted after every run.
-You can specify a custom database file location in case /tmp is not a writable
-path in your system.
+You can specify a custom database file and also a custom temporary directory in
+case /tmp is not a writable path in your system.
 
 This version of presync.sh does not handle filenames with newline characters.
 
@@ -336,7 +461,7 @@ sync_target() {
                 msg "$target"
 
                 if mv "$existing_target" "$target"; then
-                    update_target_path "$existing_target" "$target"
+                    update_target_path "$existing_target" "$target" "$hash" "$TARGET_USED"
                 else
                     msg "Error: cannot move file!"
                 fi
@@ -347,9 +472,19 @@ sync_target() {
 
     done
 
-    rm "$db"
-    msg
-    msg "Done!"
+    if [ -n "$db" ]; then
+        rm "$db"
+    else
+        rm "$tmp/presync.source" "$tmp/presync.target"
+    fi
+
+    if [ "$prune_dirs" -eq 1 ]; then
+        msg; msg "Deleting empty dirs in target..."
+        # run in a subshell to keep cwd after execution
+        (cd "$dst" && prune_dirs)
+    fi
+
+    msg; msg "Done!"
 
 }
 
@@ -357,11 +492,29 @@ update_target_path() {
 
     old_path="$1"
     new_path="$2"
+    hash="$3"
+    maybe_used=""
+    [ "${4:-}" -eq 1 ] && maybe_used=", used=1"
     directory="${dst%/}/"
     old_path_rel="${old_path#"$directory"}"
     new_path_rel="${new_path#"$directory"}"
 
-    db_query "UPDATE target SET path='$(escape_single_quotes "$new_path_rel")', used=1 WHERE path='$(escape_single_quotes "$old_path_rel")';"
+    if [ -n "$db" ]; then
+        db_query "UPDATE target SET path='$(escape_single_quotes "$new_path_rel")' $maybe_used WHERE path='$(escape_single_quotes "$old_path_rel")';"
+    else
+
+        _esc_old=$(printf '%s' $(echo "$hash|$old_path_rel" | sed 's/\//\\\//g'))
+
+        if [ "$used" -eq 0 ]; then
+            _esc_new=$(printf '%s' $(echo "$hash|$new_path_rel" | sed 's/\//\\\//g'))
+            # update path of existing file with different content
+            sed -i "s/$_esc_old/$_esc_new/" "$tmp/presync.target"
+        else
+            # here simply delete the line... same effect as updating path and used state
+            sed -i "/$_esc_old/{d; q}" "$tmp/presync.target"
+        fi
+
+    fi
 
 }
 
