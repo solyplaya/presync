@@ -324,11 +324,27 @@ prune_dirs() {
         if [ "${dir#"$dst"}" != "$dir" ] && [ -d "$dir" ]; then
 
             # only prune empty dir if it does not exist in src folder
-            [ ! -d "${src}${dir#"$dst"}" ] && rmdir "$dir" 2>/dev/null
-
+            if [ ! -d "${src}${dir#"$dst"}" ]; then
+                rmdir "$dir" 2>/dev/null
+                prune_parents "$dir"
+            fi
         fi
 
     done
+
+}
+
+prune_parents() {
+
+    path="$1"
+
+    dir="${path%/*}";
+
+    # if dir does not exist in source, is not the root of dst or the last piece...
+    if [ ! -d "${src}${dir#"$dst"}" ] && [ "$dst" != "$dir" ] && [ "$path" != "$dir" ]; then
+        rmdir "$dir" 2>/dev/null
+        prune_parents "$dir"
+    fi
 
 }
 
