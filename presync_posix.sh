@@ -519,10 +519,10 @@ update_target_path() {
         db_query "UPDATE target SET path='$(escape_single_quotes "$new_path_rel")' $maybe_used WHERE path='$(escape_single_quotes "$old_path_rel")';"
     else
 
-        _esc_old=$(printf '%s' $(echo "$hash|$old_path_rel" | sed 's/\//\\\//g'))
+        _esc_old=$(printf '%s' "$(echo "$hash|$old_path_rel" | sed 's/\//\\\//g')")
 
-        if [ "$used" -eq 0 ]; then
-            _esc_new=$(printf '%s' $(echo "$hash|$new_path_rel" | sed 's/\//\\\//g'))
+        if [ -z "$maybe_used" ]; then
+            _esc_new=$(printf '%s' "$(echo "$hash|$new_path_rel" | sed 's/\//\\\//g')")
             # update path of existing file with different content
             sed -i "s/$_esc_old/$_esc_new/" "$tmp/presync.target"
         else
