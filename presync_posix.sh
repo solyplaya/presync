@@ -163,7 +163,7 @@ get_target_path() {
     if [ -n "$db" ]; then
         db_query "SELECT path FROM target WHERE hash = '$(escape_single_quotes "$1")' AND used = 0 LIMIT 1;"
     else
-        cat "$tmp/presync.target" | grep -m 1 "$1" | cut -d '|' -f 2-
+        grep -m 1 "$1" "$tmp/presync.target" | cut -d '|' -f 2-
     fi
 
 }
@@ -365,7 +365,7 @@ rename_conflicting_target() {
 
         if [ -z "$db" ]; then
             _file_rel="${_file#"$_dir"}"
-            _hash=$(cat "$tmp/presync.target" | grep -m 1 -F "$_file_rel" | cut -d '|' -f 1)
+            _hash=$(grep -m 1 -F "$_file_rel" "$tmp/presync.target" | cut -d '|' -f 1)
         fi
 
         # hash is only required in non db mode here
