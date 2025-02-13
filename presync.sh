@@ -306,7 +306,7 @@ main() {
     while [ ${#} -gt 0 ] ; do
         case "${1}" in
 
-            --database|-d)
+            --database)
                 db="${2:-}"
                 if ! (touch "$db" 2>/dev/null && [[ -w "$db" ]]); then
                     error_exit "Cannot create database: $db"
