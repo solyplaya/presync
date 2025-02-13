@@ -200,31 +200,17 @@ main() {
 
     [ -z "${1:-}" ] && show_help
 
-    if ! (have_command "sqlite3"); then
-
-        for cmd in comm cat cut find grep sed sort; do
-            ! (have_command "$cmd") && error_exit "Error: presync requires $cmd command to run in plaintext mode."
-        done
-
-        msg "Notice: command sqlite3 not found - using slower plain text mode"
-    else
-        db="/tmp/presync.sqlite3"
-    fi
-
     while [ $# -gt 0 ] ; do
         case "$1" in
 
             --database)
-                if [ -n "$db" ]; then
-                    _custom_db="${2:-}"
-                    if ! (touch "$_custom_db" 2>/dev/null && [ -w "$_custom_db" ]); then
-                        error_exit "Cannot create database: $_custom_db"
-                    fi
-                fi
+                _custom_db="${2:-}"
                 shift
                 ;;
             --tmp)
                 tmp="${2:-}"
+                # trim trailing forward slash
+                [ -n "$tmp" ] && tmp="${tmp%/}"
                 shift
                 ;;
             --hasher)
@@ -274,25 +260,34 @@ main() {
         error_exit "Destination directory does not exist or is not writable!"
     fi
 
-    if [ -n "$db" ]; then
+    # plain text mode needs write permission to tmp dir, and further features will need a writable tmp dir
+    if ! [ -d "$tmp" ] || ! [ -w "$tmp" ] ; then
+        error_exit "Temp directory '$tmp' does not exist or is not writable!"
+    fi
+
+    if ! (have_command "sqlite3"); then
+
+        for cmd in comm cat cut find grep sed sort; do
+            ! (have_command "$cmd") && error_exit "Error: presync requires $cmd command to run in plaintext mode."
+        done
+
+        rm "$tmp/presync.source" "$tmp/presync.target" 2>/dev/null
+        msg "Notice: command sqlite3 not found - using slower plain text mode"
+
+    else
 
         if [ -n "$_custom_db" ]; then
             db="$_custom_db"
         else
-            touch "$db" 2>/dev/null
-
-            if [ ! -w "$db" ]; then
-                error_exit "Cannot write database file: $db"
-            fi
+            db="/$tmp/presync.sqlite3"
         fi
 
-    else
-        # plain text mode needs write permission to tmp dir
-        if ! [ -d "$tmp" ] || ! [ -w "$tmp" ] ; then
-            error_exit "Temp directory '$tmp' does not exist or is not writable!"
+        touch "$db" 2>/dev/null
+
+        if [ ! -w "$db" ]; then
+            error_exit "Cannot write database file: $db"
         fi
 
-        rm "$tmp/presync.source" "$tmp/presync.target" 2>/dev/null
     fi
 
     # try to find an available hasher
