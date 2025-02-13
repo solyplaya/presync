@@ -241,7 +241,7 @@ main() {
                 ;;
             --partial)
                 head_size="${2:-0}"
-                if ! ([ -n "$head_size" ] && [ "$head_size" -eq "$head_size" ] 2>/dev/null && [ "$head_size" -gt 0 ]); then
+                if [ -z "$head_size" ] || ! [ "$head_size" -eq "$head_size" ] 2>/dev/null || [ "$head_size" -le 0 ]; then
                     error_exit "Invalid head size parameter value: $head_size"
                 fi
                 shift
