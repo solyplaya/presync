@@ -286,7 +286,10 @@ main() {
 
     else
         # plain text mode needs write permission to tmp dir
-        [[ ! -d "$tmp" || ! -w "$tmp" ]] && error_exit "Temp directory '$tmp' does not exist or is not writable!"
+        if ! [ -d "$tmp" ] || ! [ -w "$tmp" ] ; then
+            error_exit "Temp directory '$tmp' does not exist or is not writable!"
+        fi
+
         rm "$tmp/presync.source" "$tmp/presync.target" 2>/dev/null
     fi
 
