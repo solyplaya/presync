@@ -1,22 +1,11 @@
 #!/bin/sh
 
-# test for normal filename scenarios
-
-# test edge scenarios (src dst starts with dash)
-# test unreadable files
-# test non writable etc.
-# test sqlite and non sqlite... need to mock sqlite presence or use docker to test!
-# create the shell script to run the tests inside docker alpine
-# see how resync handles errors with diff verbosity levels
-
 presync="./presync_posix.sh"
 src="/tmp/test_src"
 dst="/tmp/test_dst"
 dst_base="/tmp/test_dst_base"
 
 . ./common_functions
-
-# test normal, test partial, test prune, test different hashers and all other custom params
 
 test_presync_normal() {
 
