@@ -2,12 +2,17 @@
 
 ### TODO
 
+- [ ] implement end of params with -- in options processing
+- [ ] wite test files for unreadable files, unreadable folders and unprintable or problematic character combinations in path
+- [ ] add tests for filenames with newline characters and problematic / non printable character combinations
+- [ ] check proper exit code handling in --muted mode
+- [ ] test filesystem exFat / NTFS to use intermediary filename renames with changing only letter case (file -> FILE... is problematic in NTFS)
+- [ ] consolidate a single version of the script
+- [ ] add dry-run to posix version (with renaming track in a database colums for used and renamed files for better simulation)
+- [ ] add reuse db functionality to posix version, simplified non-interactive params (keep-db and resume)
+- [ ] add support for SSH in source or target (but not both)
+- [ ] add support for handling filenames with newline characters to posix version
 - [ ] review proper exit on error in subshell (add_to_db)
-- [ ] add prune dirs option to posix version
-- [ ] make configurable tmp dir via param
-- [ ] make configurable hasher command via param
-- [ ] create a posix compliant version for extended compatibility
-- [ ] add option to prune empty dirs (not existing in source)
 - [ ] add stats of actions done, specially useful for `--compact` view
 - [ ] log file option? (moved files and renamed files in the log)
 - [ ] add command to wipe all databases in temp dir. aka `rm /tmp/presync-*.sqlite3`
@@ -16,6 +21,12 @@
 
 ### DONE
 
+- [x] do a test suite for multiple shells using docker
+- [x] make configurable tmp dir via param
+- [x] make configurable hasher command via param
+- [x] add prune dirs option to posix version
+- [x] add option to prune empty dirs (not existing in source)
+- [x] create a posix compliant version for extended compatibility
 - [x] get rid of .sh in presync.sh
 - [x] add main wiki page / readme.md documentation
 - [x] tag versions in fossil

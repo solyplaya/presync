@@ -1,0 +1,62 @@
+
+# common functions for test suite
+
+gen_files() {
+
+    string="$1"
+    iterations="$2"
+    file_1="$3"
+    file_2="$4"
+
+    content=$(gen_content "$string" "$iterations")
+
+    # create missing paths as needed
+    [ ! -d "${file_1%/*}" ] && mkdir -p "${file_1%/*}"
+    echo "$content" > "$file_1"
+
+    [ ! -d "${file_2%/*}" ] && mkdir -p "${file_2%/*}"
+    echo "$content" > "$file_2"
+
+}
+
+gen_content() {
+
+    string="$1"
+    iterations="$2"
+
+    i=0;
+
+    while [ "$i" -lt "$iterations" ]; do
+        i=$((i+1))
+        string="$string${string}"
+    done
+
+    echo "$string"
+
+}
+
+gen_structure_normal(){
+
+    # generates a regular structure with all files in SRC present in DST
+    gen_files "A" "11" "$src/fruits/lemon.jpg" "$dst_base/sort/lemon_pic.jpg"
+    gen_files "B" "10" "$src/veggies/potatoes.jpg" "$dst_base/sort/po|ta|to|es.jpg"
+    gen_files "C" "11" "$src/favorite.jpg" "$dst_base/strawberry.jpg"
+    gen_files "D" "14" "$src/unchanged.jpg" "$dst_base/unchanged.jpg"
+    gen_files "E" "12" "$src/ginger.jpg" "$dst_base/favorite.jpg"
+
+}
+
+get_src_dst_diff() {
+
+    mode="$1"
+
+    # get sorted list of files in src and dst
+    (cd "$src" || exit; find . | sort > /tmp/src_files.txt)
+    (cd "$dst" || exit; find . | sort > /tmp/dst_files.txt)
+
+    result=$(comm -"$mode" /tmp/dst_files.txt /tmp/src_files.txt)
+
+    rm /tmp/dst_files.txt /tmp/src_files.txt
+    printf '%s' "$result"
+
+}
