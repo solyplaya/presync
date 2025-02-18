@@ -353,12 +353,12 @@ rename_conflicting_target() {
     _file="$1"
     _dir="${dst%/}/"
     _idx=1
-    _target="${_file%.*}_[renamed_${_idx}].${_file##*.}"
+    _target="${_file%/*}/[renamed_${_idx}]-${_file##*/}"
     _hash=""
 
     while [ -f  "$_target" ]; do
         _idx=$((_idx+1))
-        _target="${_file%.*}_[renamed_${_idx}].${_file##*.}"
+        _target="${_file%/*}/[renamed_${_idx}]-${_file##*/}"
     done
 
     if mv "$_file" "$_target"; then
@@ -403,7 +403,7 @@ the script will move all the files in dst/A to dst/B one by one, instead of
 renaming the folder. Empty folders left in target after processing can be
 deleted if passing the --prune-dirs option.
 
-On conflicts existing files get renamed to filename_[renamed_1].ext
+On conflicts existing files get renamed to [renamed_1]-filename
 
 Using the --partial argument you can speed up the synchronization process since
 only a smaller amount of data from the beginning of each file is used to calc
