@@ -165,7 +165,7 @@ get_target_path() {
     if [ -n "$db" ]; then
         db_query "SELECT path FROM target WHERE hash = '$(escape_single_quotes "$1")' AND used = 0 LIMIT 1;"
     else
-        grep -m 1 "$1" "$tmp/presync.target" | cut -d '|' -f 2-
+        grep -m 1 "^$1" "$tmp/presync.target" | cut -d '|' -f 2-
     fi
 
 }
