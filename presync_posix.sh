@@ -63,9 +63,18 @@ add_to_db() {
 
 }
 
+cleanup() {
+
+    if [ -n "$db" ]; then
+        rm "$db"
+    else
+        rm "$tmp/presync.source" "$tmp/presync.target"
+    fi
+}
+
 cleanup_exit() {
 
-    rm "$db"
+    cleanup
     exit 1
 
 }
@@ -483,11 +492,7 @@ sync_target() {
 
     done
 
-    if [ -n "$db" ]; then
-        rm "$db"
-    else
-        rm "$tmp/presync.source" "$tmp/presync.target"
-    fi
+    cleanup
 
     # check if dst is not empty first
     if [ "$prune_dirs" -eq 1 ] && [ -n "$(ls -A "$dst")" ]; then
