@@ -241,7 +241,8 @@ get_target_path() {
     if [ -n "$db" ]; then
         db_query "SELECT path FROM target WHERE hash = '$(escape_single_quotes "$1")' AND used = 0 LIMIT 1;"
     else
-        grep -m 1 "^$1" "$tmp/presync.target" | cut -d '|' -f 2-
+        _path=$(grep -m 1 "^$1" "$tmp/presync.target")
+        printf '%s' "${_path#*|}"
     fi
 
 }
@@ -370,7 +371,7 @@ main() {
 
     if ! (have_command "sqlite3"); then
 
-        for cmd in comm cat cut grep sort; do
+        for cmd in comm cat grep sort; do
             ! (have_command "$cmd") && error_exit "Error: presync requires $cmd command to run in plaintext mode."
         done
 
@@ -509,7 +510,8 @@ rename_conflicting_target() {
         if [ -z "$db" ]; then
             _file_rel="${_file#"$_dir"}"
             has_newline "$_file_rel" && _file_rel=$(escape_nl "$_file_rel")
-            _hash=$(grep -m 1 -F -- "$_file_rel" "$tmp/presync.target" | cut -d '|' -f 1)
+            _hash=$(grep -m 1 -F -- "$_file_rel" "$tmp/presync.target")
+            _hash="${_hash%%|*}"
         fi
 
         # hash is only required in plain text mode
