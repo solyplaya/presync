@@ -27,7 +27,7 @@
 
 set -o nounset
 
-VERSION="1.2"
+VERSION="1.3"
 TARGET_USED="1"
 TARGET_CONFLICT="0"
 src=""
@@ -418,6 +418,41 @@ main() {
 
 }
 
+make_path() {
+
+    # function to iterate each subfolder to be created in a path dealing with conflicting files
+
+    # this is the base dir to build upon
+    __dir="$1"
+
+    # remove the last part.. aka the file so we have now only a sub dir path
+    __file="${2%/*}"
+
+    # argument does not have any sub folders
+    [ "$2" = "$__file" ] && return
+
+    while [ -n "$__file" ]; do
+
+        __dir="$__dir/${__file%%/*}"
+
+        # path exists as a regular file or symlink, try to rename
+        if [ -f "$__dir" ] || [ -h "$__dir" ]; then
+            rename_conflicting_target "$__dir"
+        fi
+
+        if [ ! -e "$__dir" ]; then
+            mkdir "$__dir" || return
+        fi
+        if [ "$__file" = "${__file#*/}" ]; then
+            __file=""
+        else
+            __file="${__file#*/}"
+        fi
+
+    done
+
+}
+
 msg() {
 
     [ "$muted" != "0" ] && return
@@ -507,15 +542,20 @@ rename_conflicting_target() {
 
     if mv "$_file" "$_target"; then
 
-        if [ -z "$db" ]; then
-            _file_rel="${_file#"$_dir"}"
-            has_newline "$_file_rel" && _file_rel=$(escape_nl "$_file_rel")
-            _hash=$(grep -m 1 -F -- "$_file_rel" "$tmp/presync.target")
-            _hash="${_hash%%|*}"
-        fi
+        # only update target path if moved file was a regular file and not a symlink
+        if [ -f "$_target" ]; then
 
-        # hash is only required in plain text mode
-        update_target_path "$_file" "$_target" "$_hash" "$TARGET_CONFLICT"
+            if [ -z "$db" ]; then
+                _file_rel="${_file#"$_dir"}"
+                has_newline "$_file_rel" && _file_rel=$(escape_nl "$_file_rel")
+                _hash=$(grep -m 1 -F -- "$_file_rel" "$tmp/presync.target")
+                _hash="${_hash%%|*}"
+            fi
+
+            # hash is only required in plain text mode
+            update_target_path "$_file" "$_target" "$_hash" "$TARGET_CONFLICT"
+
+        fi
 
     fi
 
@@ -658,7 +698,21 @@ sync_target() {
             [ -f "$target" ] && rename_conflicting_target "$target"
 
             # Create intermediary folders as needed
-            [ ! -d "${target%/*}" ] && mkdir -p "${target%/*}"
+            # [ ! -d "${target%/*}" ] && mkdir -p "${target%/*}"
+
+            if [ ! -d "${target%/*}" ]; then
+
+                # Is the dir to be created an already existing file or contains an existing file in its path?
+                # if so, need to rename in order to accomodate the new file path. We only rename regular files and symlinks.
+                make_path "$dst" "$file"
+
+                if [ ! -d "${target%/*}" ]; then
+                    msg "Cannot create target path: ${target%/*}"
+                    continue
+                fi
+
+            fi
+
 
             if [ -f "$target" ]; then
                 msg  "Error: cannot rename conflicting target: $target"

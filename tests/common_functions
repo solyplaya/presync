@@ -79,6 +79,7 @@ gen_structure_normal(){
     gen_files "C" "11" "$src/favorite.jpg" "$dst_base/strawberry.jpg"
     gen_files "D" "14" "$src/unchanged.jpg" "$dst_base/unchanged.jpg"
     gen_files "E" "12" "$src/ginger.jpg" "$dst_base/favorite.jpg"
+    gen_files "F" "10" "$src/fruits.txt" "$dst_base/fruits"
 
 }
 
@@ -93,6 +94,7 @@ gen_structure_special(){
     gen_files "C" "11" "$src/${special_base}-favorite.jpg" "$dst_base/strawberry.jpg"
     gen_files "D" "14" "$src/${special_base}-unchanged.jpg" "$dst_base/${special_base}-unchanged.jpg"
     gen_files "E" "12" "$src/ginger.jpg" "$dst_base/${special_base}-favorite.jpg"
+    gen_files "F" "10" "$src/fruits.txt" "$dst_base/fruits"
 
 }
 
