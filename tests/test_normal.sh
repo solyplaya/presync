@@ -100,15 +100,19 @@ oneTimeSetUp() {
 
         "special_chars")
 
+            # shellcheck disable=SC1003
             src=$(printf -- '--$`!*@__ SRC __\a\b\E\f\r\t\v\\\''"\360\240\202\211 \nx')
             src="${src%x}"
 
+            # shellcheck disable=SC1003
             dst=$(printf -- '--$`!*@__ DST __\a\b\E\f\r\t\v\\\''"\360\240\202\211 \nx')
             dst="${dst%x}"
 
+            # shellcheck disable=SC1003
             custom_tmp=$(printf -- '--$`!*@__ TMP __\a\b\E\f\r\t\v\\\''"\360\240\202\211 \nx')
             custom_tmp="${custom_tmp%x}"
 
+            # shellcheck disable=SC1003
             custom_db=$(printf -- '--$`!*@__ DB_FILE __\a\b\E\f\r\t\v\\\''"\360\240\202\211 \nx')
             custom_db="${custom_db%x}"
 
