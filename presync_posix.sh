@@ -138,7 +138,7 @@ CREATE TABLE target (
 
 db_query() {
 
-    echo "$1" | sqlite3 "$db" || error_exit "sqlite3 database query error!: $1"
+    printf '%s' "$1" | sqlite3 "$db" || error_exit "sqlite3 database query error!: $1"
 
 }
 
@@ -556,7 +556,7 @@ replace_nl_placeholders() {
 
 show_help() {
 
-    echo "presync.sh (posix) version $VERSION Copyright (c) 2025 Francisco Gonzalez
+    printf '%s' "presync.sh (posix) version $VERSION Copyright (c) 2025 Francisco Gonzalez
 MIT license
 
 presync renames files in target folder to match existing files in source folder
