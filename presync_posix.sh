@@ -27,7 +27,7 @@
 
 set -o nounset
 
-VERSION="1.1"
+VERSION="1.2"
 TARGET_USED="1"
 TARGET_CONFLICT="0"
 src=""
@@ -38,30 +38,20 @@ head_size=0
 muted=0
 prune_dirs=0
 tmp="/tmp"
+nl_placeholder="<<_NEW_LINE_>>"
+global_string=""
 
-add_to_db() {
-
-    table="$1"
-    file="$2"
-    directory="${3%/}/"
-    file_rel="${file#"$directory"}"
-
-    hash=$(get_hash_from_file "$file")
-
-    if [ -n "$hash" ]; then
-
-        if [ -n "$db" ]; then
-            db_query "INSERT OR REPLACE INTO $table (hash, path) VALUES ('$(escape_single_quotes "$hash")', '$(escape_single_quotes "$file_rel")');"
-        else
-            # be ware of special chars and interpretation of backslashes
-            echo "$hash|$file_rel" >> "$tmp/presync.$table"
-        fi
-
-    else
-        msg "Error: cannot generate checksum for file: $file"
-    fi
-
-}
+# special characters for message printing filter
+_SUB=$(printf "\032")  # SUB character (ASCII 26) - as a visual substitute for unprintable chars
+_BELL=$(printf "\007") # Bell character (ASCII 7)
+_BS=$(printf "\010")   # BackSpace (ASCII 8)
+_ESC=$(printf "\033")  # Escape character (ASCII 27)
+_FF=$(printf "\014")   # Form Feed (ASCII 12)
+_CR=$(printf "\015")   # Carriage Return (ASCII 13)
+_HT=$(printf "\011")   # Horizontal Tab (ASCII 9)
+_VT=$(printf "\013")   # Vertical Tab (ASCII 11)
+_LF=$(printf "\012#")  # Line Feed (ASCII 10)
+_LF="${_LF%#}"         # $(...) removes trailing newlines, so use an extra char to keep it and remove it afterwards
 
 cleanup() {
 
@@ -81,14 +71,45 @@ cleanup_exit() {
 
 collect_hashes() {
 
-    table="$1"
-    directory="$2"
+    # posix compliant recursive file loop using path expansion
+    # does not create a subshell and handles filenames with newline characters
+    # deals only with files (ignores symlinks)
 
-    msg "Collecting $table checksums..."
+    # uses global variables: table, directory
 
-    find "$directory" -type f | while IFS= read -r file; do
-        # Check if file path starts with directory as mitigation to filenames with new line characters
-        [ "${file#"$directory"}" != "$file" ] && [ -r "$file" ] && add_to_db "$table" "$file" "$directory"
+    for item in "$1"/* "$1"/.*; do
+
+        # prevent messy follow-ups of a symlink, current or parent directory
+        [ "${item##*/}" = "." ] || [ "${item##*/}" = ".." ] || [ -h "$item" ] && continue
+
+        if [ -d "$item" ]; then
+                collect_hashes "$item"
+        else
+
+            if [ -f "$item" ]; then
+
+                hash=$(get_hash_from_file "$item")
+
+                if [ -n "$hash" ]; then
+
+                    file_rel="${item#"$directory"}"
+
+                    if has_newline "$file_rel"; then
+                        file_rel=$(escape_nl "$file_rel")
+                    fi
+
+                    if [ -n "$db" ]; then
+                        db_query "INSERT OR REPLACE INTO $table (hash, path) VALUES ('$(escape_single_quotes "$hash")', '$(escape_single_quotes "$file_rel")');"
+                    else
+                        printf '%s\n' "$hash|$file_rel" >> "$tmp/presync.$table"
+                    fi
+
+                else
+                    msg "Error: cannot generate checksum for file: $item"
+                fi
+
+            fi
+        fi
     done
 
 }
@@ -128,17 +149,43 @@ error_exit() {
 
 }
 
+escape_backslashes() {
+
+    escape_string "$1" "\\" "\\\\"
+
+}
+
+escape_forwardslashes() {
+
+    escape_string "$1" "/" "\\/"
+
+}
+
+escape_nl() {
+
+    escape_string "$1" "$_LF" "$nl_placeholder"
+
+}
+
 escape_single_quotes() {
 
+    escape_string "$1" "'" "''"
+
+}
+
+escape_string() {
+
     input="$1"
+    _char="$2"
+    _replace="$3"
     output=""
 
     while [ -n "$input" ]; do
         char="${input%"${input#?}"}"
         rest="${input#?}"
 
-        if [ "$char" = "'" ]; then
-            output="${output}''"
+        if [ "$char" = "$_char" ]; then
+            output="${output}${_replace}"
         else
             output="${output}${char}"
         fi
@@ -152,16 +199,36 @@ escape_single_quotes() {
 
 get_hash_from_file() {
 
+    # obtains the hash from a given file dealing properly with filenames with newline characters
+    # that generate different outputs dependinng on the hasher used
+
     file="$1"
     hash=""
 
     if [ -r "$file" ]; then
 
         if [ "$head_size" -gt 0 ]; then
-            hash=$(head -c "${head_size}"k "$file" | $hasher | cut -d' ' -f1)
+            hash=$(head -c "${head_size}"k "$file" | $hasher 2>/dev/null)
         else
-            hash=$($hasher "$file" | cut -d' ' -f1)
+            if has_newline "$file"; then
+                hash=$($hasher -- "$file" 2>/dev/null | head -n 1)
+            else
+                hash=$($hasher -- "$file" 2>/dev/null)
+            fi
         fi
+
+    fi
+
+    if [ -n "$hash" ]; then
+
+        # remove leading backslash produced by sha1sum and md5sum if input filename has newline characters
+        hash="${hash#\\}"
+
+        # get only the hash and leave out the filename part
+        hash="${hash%% *}"
+
+        # do not use garbage data as a hash
+        ! valid_hex "$hash" && hash=""
 
     fi
 
@@ -200,6 +267,24 @@ get_unique_sources(){
 have_command(){
 
     command -v "$1" > /dev/null
+
+}
+
+has_newline() {
+
+    case "$1" in
+        *"$_LF"*) return 0;;
+        *) return 1;;
+    esac
+
+}
+
+has_placeholders() {
+
+    case "$1" in
+        *"$nl_placeholder"*) return 0;;
+        *) return 1;;
+    esac
 
 }
 
@@ -246,6 +331,10 @@ main() {
             --prune-dirs)
                 prune_dirs=1
                 ;;
+            --)
+                shift
+                break
+                ;;
             --*|-*)
                 error_exit "Unknown parameter: $1"
                 ;;
@@ -274,13 +363,20 @@ main() {
         error_exit "Temp directory '$tmp' does not exist or is not writable!"
     fi
 
+    # prevent interpretation of paths as arguments
+    [ "${src#/}" = "$src" ] && [ "${src#./}" = "$src" ] && src="./$src"
+    [ "${dst#/}" = "$dst" ] && [ "${dst#./}" = "$dst" ] && dst="./$dst"
+    [ "${tmp#/}" = "$tmp" ] && [ "${tmp#./}" = "$tmp" ] && tmp="./$tmp"
+
     if ! (have_command "sqlite3"); then
 
-        for cmd in comm cat cut find grep sed sort; do
+        for cmd in comm cat cut grep sort; do
             ! (have_command "$cmd") && error_exit "Error: presync requires $cmd command to run in plaintext mode."
         done
 
-        rm "$tmp/presync.source" "$tmp/presync.target" 2>/dev/null
+        [ -f "$tmp/presync.source" ] && rm "$tmp/presync.source" 2>/dev/null
+        [ -f "$tmp/presync.target" ] && rm "$tmp/presync.target" 2>/dev/null
+
         msg "Notice: command sqlite3 not found - using slower plain text mode"
 
     else
@@ -288,8 +384,11 @@ main() {
         if [ -n "$_custom_db" ]; then
             db="$_custom_db"
         else
-            db="/$tmp/presync.sqlite3"
+            db="$tmp/presync.sqlite3"
         fi
+
+        # prevent interpretation of paths as arguments
+        [ "${db#/}" = "$db" ] && [ "${db#./}" = "$db" ] && db="./$db"
 
         touch "$db" 2>/dev/null
 
@@ -302,8 +401,7 @@ main() {
     # try to find an available hasher
     if [ -z "$hasher" ]; then
 
-        # test b2sum and cksum
-        for cmd in xxh128sum sha1sum md5sum md5; do
+        for cmd in xxh128sum b3sum sha1sum md5sum md5; do
             if have_command "$cmd"; then
                 hasher="$cmd"
                 [ "$hasher" != "xxh128sum" ] && msg "Notice: command xxh128sum not found - using slower hasher $hasher"
@@ -321,22 +419,60 @@ main() {
 
 msg() {
 
-    [ "$muted" -eq 0 ] && echo "${1:-}"
+    [ "$muted" != "0" ] && return
+
+    input="${1:-}"
+    output=""
+
+    while [ -n "$input" ]; do
+
+        char="${input%"${input#?}"}"
+        rest="${input#?}"
+
+        case "$char" in
+            "$_BELL" | "$_BS" | "$_ESC" | "$_FF" | "$_CR" | "$_HT" | "$_VT" | "$_LF") output="${output}$_SUB" ;;
+            *) output="${output}${char}" ;;
+        esac
+
+        input="$rest"
+
+    done
+
+    printf '%s\n' "$output"
 
 }
 
 prune_dirs() {
 
-    find "$dst" -type d -empty | while IFS= read -r dir; do
+    # only prune dirs if dst is not empty
+    if [ "$prune_dirs" -eq 1 ] && [ -n "$(ls -A "$dst")" ]; then
+        msg; msg "Deleting empty dirs in target..."
+        prune_empty_dirs "$dst"
+    fi
 
-        # Check if dir path starts with directory as mitigation to filenames with new line characters
-        if [ "${dir#"$dst"}" != "$dir" ] && [ -d "$dir" ]; then
+}
 
-            # only prune empty dir if it does not exist in src folder
+prune_empty_dirs() {
+
+    # uses src dst globals
+
+    # loop only directories including hidden ones
+    for dir in "$1"/*/ "$1"/.*/; do
+
+        # remove trailing slash
+        dir="${dir%/*}"
+
+        # prevent messy follow-ups of symlink, current dir, parent dir or the pattern itself
+        [ "${dir##*/}" = "." ] || [ "${dir##*/}" = ".." ] || [ -h "$dir" ] || ! [ -d "$dir" ] && continue
+
+        if [ -d "$dir" ] && [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
+
+            # only delete the empty dir if it does not exist in source
             if [ ! -d "${src}${dir#"$dst"}" ]; then
-                rmdir "$dir" 2>/dev/null
-                prune_parents "$dir"
+                rmdir "$dir" 2>/dev/null && prune_parents "$dir"
             fi
+        else
+            prune_empty_dirs "$dir"
         fi
 
     done
@@ -346,13 +482,11 @@ prune_dirs() {
 prune_parents() {
 
     path="$1"
-
     dir="${path%/*}";
 
     # if dir does not exist in source, is not the root of dst or the last piece...
     if [ ! -d "${src}${dir#"$dst"}" ] && [ "$dst" != "$dir" ] && [ "$path" != "$dir" ]; then
-        rmdir "$dir" 2>/dev/null
-        prune_parents "$dir"
+        rmdir "$dir" 2>/dev/null && prune_parents "$dir"
     fi
 
 }
@@ -374,13 +508,47 @@ rename_conflicting_target() {
 
         if [ -z "$db" ]; then
             _file_rel="${_file#"$_dir"}"
-            _hash=$(grep -m 1 -F "$_file_rel" "$tmp/presync.target" | cut -d '|' -f 1)
+            has_newline "$_file_rel" && _file_rel=$(escape_nl "$_file_rel")
+            _hash=$(grep -m 1 -F -- "$_file_rel" "$tmp/presync.target" | cut -d '|' -f 1)
         fi
 
-        # hash is only required in non db mode here
+        # hash is only required in plain text mode
         update_target_path "$_file" "$_target" "$_hash" "$TARGET_CONFLICT"
 
     fi
+
+}
+
+replace_global_string() {
+
+    # posix compliant search and relace using parameter expansion
+    # works only on global_string to preserve trailing newline characters
+
+    string="$global_string"
+    search="$1"
+    replace="$2"
+    output=""
+
+    while [ -n "$string" ]; do
+
+        if [ "${string#"$search"}" != "$string" ]; then
+            output="${output}$replace"
+            string="${string#"$search"}"
+        else
+            output="${output}${string%"${string#?}"}"
+            string="${string#?}"
+        fi
+
+    done
+
+    global_string="$output"
+
+}
+
+replace_nl_placeholders() {
+
+    global_string="$1"
+    replace_global_string "$nl_placeholder" "$_LF"
 
 }
 
@@ -424,8 +592,6 @@ Database files are stored in /tmp/presync.sqlite and deleted after every run.
 You can specify a custom database file and also a custom temporary directory in
 case /tmp is not a writable path in your system.
 
-This version of presync.sh does not handle filenames with newline characters.
-
 Example usage:
 
 synchronize renamed files in backup
@@ -443,9 +609,18 @@ sync_target() {
 
     idx=0
 
+    # sqlite3 or plaintext
     db_init
-    collect_hashes "target" "$dst"
-    collect_hashes "source" "$src"
+
+    # collect target hashes
+    table="target"
+    directory="${dst%/}/"
+    collect_hashes "$dst"
+
+    # collect source hashes
+    table="source"
+    directory="${src%/}/"
+    collect_hashes "$src"
 
     msg "presync-ing..."
 
@@ -455,18 +630,27 @@ sync_target() {
         file="${row#*|}"
         hash="${row%%|*}"
 
-        target="$dst/$file"
-
         existing_target="$(get_target_path "$hash")"
 
         if [ -n "$existing_target" ]; then
 
             idx=$((idx+1))
 
+            if has_placeholders "$existing_target"; then
+                replace_nl_placeholders "$existing_target"
+                existing_target="$global_string"
+            fi
+
+            if has_placeholders "$file"; then
+                replace_nl_placeholders "$file"
+                file="$global_string"
+            fi
+
+            # build target, with any nl chars translated back
+            target="$dst/$file"
             existing_target="$dst/$existing_target"
 
-            msg
-            msg "[$idx] $src/$file"
+            msg; msg "[$idx] ${src#./}/$file"
 
             # Rename existing target with different content since we have a candidate to take its place.
             [ -f "$target" ] && rename_conflicting_target "$target"
@@ -477,8 +661,8 @@ sync_target() {
             if [ -f "$target" ]; then
                 msg  "Error: cannot rename conflicting target: $target"
             else
-                msg "$existing_target"
-                msg "$target"
+                msg "${existing_target#./}"
+                msg "${target#./}"
 
                 if mv "$existing_target" "$target"; then
                     update_target_path "$existing_target" "$target" "$hash" "$TARGET_USED"
@@ -493,46 +677,64 @@ sync_target() {
     done
 
     cleanup
-
-    # check if dst is not empty first
-    if [ "$prune_dirs" -eq 1 ] && [ -n "$(ls -A "$dst")" ]; then
-        msg; msg "Deleting empty dirs in target..."
-        # run in a subshell to keep cwd after execution
-        # (cd "$dst" && prune_dirs)
-        prune_dirs
-    fi
-
+    prune_dirs
     msg; msg "Done!"
 
 }
 
 update_target_path() {
 
+    # paths come here with nl unescapped if any
     old_path="$1"
     new_path="$2"
     hash="$3"
     maybe_used=""
-    [ "${4:-}" -eq 1 ] && maybe_used=", used=1"
+    [ "${4:-0}" -eq 1 ] && maybe_used=", used=1"
     directory="${dst%/}/"
     old_path_rel="${old_path#"$directory"}"
     new_path_rel="${new_path#"$directory"}"
+
+    has_newline "$old_path_rel" && old_path_rel=$(escape_nl "$old_path_rel")
+    has_newline "$new_path_rel" && new_path_rel=$(escape_nl "$new_path_rel")
 
     if [ -n "$db" ]; then
         db_query "UPDATE target SET path='$(escape_single_quotes "$new_path_rel")' $maybe_used WHERE path='$(escape_single_quotes "$old_path_rel")';"
     else
 
-        _esc_old=$(printf '%s' "$(echo "$hash|$old_path_rel" | sed 's/\//\\\//g')")
-
+        # use intermediate temp file for text editing
         if [ -z "$maybe_used" ]; then
-            _esc_new=$(printf '%s' "$(echo "$hash|$new_path_rel" | sed 's/\//\\\//g')")
             # update path of existing file with different content
-            sed -i "s/$_esc_old/$_esc_new/" "$tmp/presync.target"
+            grep -v -F "$hash|$old_path_rel" "$tmp/presync.target" > "$tmp/presync.target.tmp"
+            printf '%s\n' "$hash|$new_path_rel" >> "$tmp/presync.target.tmp"
+            mv "$tmp/presync.target.tmp" "$tmp/presync.target"
+
         else
-            # here simply delete the line... same effect as updating path and used state
-            sed -i "/$_esc_old/{d; q}" "$tmp/presync.target"
+            # delete the line has same effect as updating path and used state for now
+            grep -v -F "$hash|$old_path_rel" "$tmp/presync.target" > "$tmp/presync.target.tmp"
+            mv "$tmp/presync.target.tmp" "$tmp/presync.target"
+
         fi
 
     fi
+
+}
+
+valid_hex() {
+
+    # check if we got a valid hex string a-f0-9 without regex
+
+    str="$1"
+
+    [ -z "$str" ] && return 1
+
+    while [ -n "$str" ]; do
+        char="${str%"${str#?}"}"
+        str="${str#?}"
+
+        case "$char" in [!a-f0-9]) return 1 ;; esac
+    done
+
+    return 0
 
 }
 

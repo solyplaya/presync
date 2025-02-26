@@ -1,5 +1,41 @@
+#!/bin/sh
 
 # common functions for test suite
+
+# special characters for message printing filter
+_SUB=$(printf "\032")  # SUB character (ASCII 26) - as a visual substitute for unprintable chars
+_BELL=$(printf "\007") # Bell character (ASCII 7)
+_BS=$(printf "\010")   # BackSpace (ASCII 8)
+_ESC=$(printf "\033")  # Escape character (ASCII 27)
+_FF=$(printf "\014")   # Form Feed (ASCII 12)
+_CR=$(printf "\015")   # Carriage Return (ASCII 13)
+_HT=$(printf "\011")   # Horizontal Tab (ASCII 9)
+_VT=$(printf "\013")   # Vertical Tab (ASCII 11)
+_LF=$(printf "\012#")  # Line Feed (ASCII 10)
+_LF="${_LF%#}"         # $(...) removes trailing newlines, so use an extra char to keep it and remove it afterwards
+
+msg() {
+
+    input="${1:-}"
+    output=""
+
+    while [ -n "$input" ]; do
+
+        char="${input%"${input#?}"}"
+        rest="${input#?}"
+
+        case "$char" in
+            "$_BELL" | "$_BS" | "$_ESC" | "$_FF" | "$_CR" | "$_HT" | "$_VT" | "$_LF") output="${output}$_SUB" ;;
+            *) output="${output}${char}" ;;
+        esac
+
+        input="$rest"
+
+    done
+
+    printf '%s\n' "$output"
+
+}
 
 gen_files() {
 
@@ -11,11 +47,11 @@ gen_files() {
     content=$(gen_content "$string" "$iterations")
 
     # create missing paths as needed
-    [ ! -d "${file_1%/*}" ] && mkdir -p "${file_1%/*}"
-    echo "$content" > "$file_1"
+    [ ! -d "${file_1%/*}" ] && mkdir -p -- "${file_1%/*}"
+    printf '%s\n' "$content" > "$file_1"
 
-    [ ! -d "${file_2%/*}" ] && mkdir -p "${file_2%/*}"
-    echo "$content" > "$file_2"
+    [ ! -d "${file_2%/*}" ] && mkdir -p -- "${file_2%/*}"
+    printf '%s\n' "$content" > "$file_2"
 
 }
 
@@ -46,17 +82,38 @@ gen_structure_normal(){
 
 }
 
+gen_structure_special(){
+
+    special_base=$(printf -- '--$`!*@__ FILE __\a\b\E\f\r\t\v\\\''"\360\240\202\211 \n#')
+    special_base="${special_base%#}"
+
+    # generates a regular structure with all files in SRC present in DST
+    gen_files "A" "11" "$src/fruits/${special_base}-lemon.jpg" "$dst_base/sort/${special_base}-lemon_pic.jpg"
+    gen_files "B" "10" "$src/veggies/${special_base}-potatoes.jpg" "$dst_base/sort/po|ta|to|es.jpg"
+    gen_files "C" "11" "$src/${special_base}-favorite.jpg" "$dst_base/strawberry.jpg"
+    gen_files "D" "14" "$src/${special_base}-unchanged.jpg" "$dst_base/${special_base}-unchanged.jpg"
+    gen_files "E" "12" "$src/ginger.jpg" "$dst_base/${special_base}-favorite.jpg"
+
+}
+
 get_src_dst_diff() {
 
     mode="$1"
 
+    _pwd=$(pwd)
+
     # get sorted list of files in src and dst
-    (cd "$src" || exit; find . | sort > /tmp/src_files.txt)
-    (cd "$dst" || exit; find . | sort > /tmp/dst_files.txt)
+    cd -- "$src" || exit; find . | sort > /tmp/src_files.txt
+    cd "$_pwd"
+
+    cd -- "$dst" || exit; find . | sort > /tmp/dst_files.txt
+    cd "$_pwd"
 
     result=$(comm -"$mode" /tmp/dst_files.txt /tmp/src_files.txt)
 
     rm /tmp/dst_files.txt /tmp/src_files.txt
-    printf '%s' "$result"
+
+    # filter unprintable chars
+    msg "$result"
 
 }

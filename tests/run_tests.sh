@@ -16,52 +16,64 @@ cp ../presync_posix.sh ./ || exit
 
 # run shellcheck
 info_msg "Running shellcheck.,,"
-sudo docker run --rm -ti -v "$PWD:/tests" presync/tests:alpine sh -c '
+sudo docker run --rm -ti -v "$PWD:/tests" presync/tests:alpine sh -c "$(cat <<ENDSSH
 
-    cd /tests
+    cp -pr /tests /home/tester/isolated_tests
+    cd /home/tester/isolated_tests || exit
 
     for SH in sh bash dash ksh; do
-        echo "Running shellcheck with: $SH"
-        shellcheck -s $SH ./presync_posix.sh || break
+        echo "Running shellcheck with: \$SH"
+        shellcheck -s \$SH ./presync_posix.sh || break
     done
-'
+ENDSSH
+)"
 
-# run test_normal.sh
-echo
-info_msg "Running test_normal (with sqlite3 binary)"
-sudo docker run --rm -ti -v "$PWD:/tests" presync/tests:alpine sh -c '
+for test_type in normal special_chars; do
 
-    cd /tests
+    echo
+    info_msg "Running test_normal (with sqlite3 binary)"
+    sudo docker run --rm -ti -v "$PWD:/tests" presync/tests:alpine sh -c "$(cat <<ENDSSH
 
-    for SH in sh bash dash zsh oksh; do
-        echo "Running \"test_normal.sh\" tests with shell: $SH"
+        cp -pr /tests /home/tester/isolated_tests
+        cd /home/tester/isolated_tests || exit
 
-        if [ "$SH" = "zsh" ]; then
-            zsh -o shwordsplit -- ./test_normal.sh
-            # zsh -o shwordsplit -- ./test_get_hash_from_file.sh
-        else
-            $SH ./test_normal.sh
-            # $SH ./test_get_hash_from_file.sh
-        fi
+        for SH in sh bash dash zsh oksh; do
+            echo "Running \"test_normal.sh\" \"$test_type\" tests with shell: \$SH"
 
-    done
-'
+            if [ "\$SH" = "zsh" ]; then
+                zsh -o shwordsplit -- ./test_normal.sh "$test_type"
+                # zsh -o shwordsplit -- ./test_get_hash_from_file.sh "$test_type"
+            else
+                \$SH ./test_normal.sh "$test_type"
+                # \$SH ./test_get_hash_from_file.sh "$test_type"
+            fi
 
-echo
-info_msg "Running test_normal in plain text mode (NO sqlite3 binary)"
-sudo docker run --rm -ti -v "$PWD:/tests" presync/tests:alpine-nodb sh -c '
-    cd /tests
+        done
+ENDSSH
+)"
 
-    for SH in sh bash dash zsh oksh; do
-        echo "Running \"test_normal.sh\" tests with shell: $SH"
+    echo
+    info_msg "Running test_normal in plain text mode (NO sqlite3 binary)"
+    sudo docker run --rm -ti -v "$PWD:/tests" presync/tests:alpine-nodb sh -c "$(cat <<ENDSSH
 
-        if [ "$SH" = "zsh" ]; then
-            zsh -o shwordsplit -- ./test_normal.sh
-        else
-            $SH ./test_normal.sh
-        fi
+        cp -pr /tests /home/tester/isolated_tests
+        cd /home/tester/isolated_tests || exit
 
-    done
-'
+        for SH in sh bash dash zsh oksh; do
+            echo "Running \"test_normal.sh\" \"$test_type\" (NO sqlite3 binary) tests with shell: \$SH"
+
+            if [ "\$SH" = "zsh" ]; then
+                zsh -o shwordsplit -- ./test_normal.sh "$test_type"
+            else
+                \$SH ./test_normal.sh "$test_type"
+            fi
+
+        done
+ENDSSH
+)"
+
+done
 
 rm presync_posix.sh
+
+# EOF
