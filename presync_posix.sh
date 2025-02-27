@@ -254,11 +254,9 @@ get_unique_sources(){
     else
         sort "$tmp/presync.source" > "$tmp/presync.source.sorted"
         sort "$tmp/presync.target" > "$tmp/presync.target.sorted"
-        comm -23 "$tmp/presync.source.sorted" "$tmp/presync.target.sorted" > "$tmp/presync.source.unique"
-        comm -13 "$tmp/presync.source.sorted" "$tmp/presync.target.sorted" > "$tmp/presync.target.unique"
+        comm -23 "$tmp/presync.source.sorted" "$tmp/presync.target.sorted" > "$tmp/presync.source"
+        comm -13 "$tmp/presync.source.sorted" "$tmp/presync.target.sorted" > "$tmp/presync.target"
         rm "$tmp/presync.source.sorted" "$tmp/presync.target.sorted"
-        mv "$tmp/presync.source.unique" "$tmp/presync.source"
-        mv "$tmp/presync.target.unique" "$tmp/presync.target"
 
         cat "$tmp/presync.source"
     fi
