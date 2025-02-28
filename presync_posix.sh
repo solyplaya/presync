@@ -58,7 +58,8 @@ cleanup() {
     if [ -n "$db" ]; then
         rm "$db"
     else
-        rm "$tmp/presync.source" "$tmp/presync.target"
+        [ -f "$tmp/presync.source" ] && rm "$tmp/presync.source" 2>/dev/null
+        [ -f "$tmp/presync.target" ] && rm "$tmp/presync.target" 2>/dev/null
     fi
 }
 
@@ -145,6 +146,7 @@ db_query() {
 error_exit() {
 
     msg "$1"
+    cleanup
     exit 1
 
 }
@@ -252,10 +254,11 @@ get_unique_sources(){
     if [ -n "$db" ]; then
         db_query "SELECT s.hash, s.path FROM source s LEFT JOIN target t ON s.hash = t.hash AND s.path = t.path WHERE t.id IS NULL;"
     else
-        sort "$tmp/presync.source" > "$tmp/presync.source.sorted"
-        sort "$tmp/presync.target" > "$tmp/presync.target.sorted"
-        comm -23 "$tmp/presync.source.sorted" "$tmp/presync.target.sorted" > "$tmp/presync.source"
-        comm -13 "$tmp/presync.source.sorted" "$tmp/presync.target.sorted" > "$tmp/presync.target"
+        sort "$tmp/presync.source" > "$tmp/presync.source.sorted" \
+            && sort "$tmp/presync.target" > "$tmp/presync.target.sorted" \
+            && comm -23 "$tmp/presync.source.sorted" "$tmp/presync.target.sorted" > "$tmp/presync.source" \
+            && comm -13 "$tmp/presync.source.sorted" "$tmp/presync.target.sorted" > "$tmp/presync.target" \
+            || error_exit "Cannot write to temp file!"
         rm "$tmp/presync.source.sorted" "$tmp/presync.target.sorted"
 
         cat "$tmp/presync.source"
