@@ -9,15 +9,14 @@
 - [ ] add dry-run to posix version (with renaming track in a database colums for used and renamed files for better simulation)
 - [ ] add reuse db functionality to posix version, simplified non-interactive params `--keep-db` and `--resume`
 - [ ] add support for SSH in source or target (but not both)
-- [ ] review proper exit on error in `db_query`
 - [ ] add stats of actions done
 - [ ] log file option? (moved files and renamed files in the log)
 - [ ] add command to wipe all databases in temp dir. aka `rm /tmp/presync-*`
 - [ ] add cross platform tests
-- [ ] consider this progress bar: https://github.com/pollev/bash_progress_bar
 
 ### DONE
 
+- [x] review proper exit on error in `db_query` (no longer runs in a subshell, so exit does properly terminate the script)
 - [x] implement end of params with -- in options processing
 - [x] add tests for filenames with newline characters and problematic / non printable character combinations
 - [x] add support for handling filenames with newline characters to posix version

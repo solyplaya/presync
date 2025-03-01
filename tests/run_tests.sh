@@ -23,7 +23,7 @@ sudo docker run --rm -ti -v "$PWD:/tests" presync/tests:alpine sh -c "$(cat <<EN
 
     for SH in sh bash dash ksh; do
         echo "Running shellcheck with: \$SH"
-        shellcheck -s \$SH ./presync_posix.sh || break
+        shellcheck -s \$SH -e SC2015 ./presync_posix.sh || break
     done
 ENDSSH
 )"

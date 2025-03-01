@@ -33,6 +33,8 @@ TARGET_CONFLICT="0"
 src=""
 dst=""
 db=""
+t_src=""
+t_dst=""
 hasher=""
 head_size=0
 muted=0
@@ -55,12 +57,12 @@ _LF="${_LF%#}"         # $(...) removes trailing newlines, so use an extra char 
 
 cleanup() {
 
-    if [ -n "$db" ]; then
-        rm "$db"
-    else
-        [ -f "$tmp/presync.source" ] && rm "$tmp/presync.source" 2>/dev/null
-        [ -f "$tmp/presync.target" ] && rm "$tmp/presync.target" 2>/dev/null
-    fi
+    [ -f "$db" ] && rm "$db" 2>/dev/null
+    [ -f "$t_src" ] && rm "$t_src" 2>/dev/null
+    [ -f "$t_dst" ] && rm "$t_dst" 2>/dev/null
+    [ -f "$t_src.s" ] && rm "$t_src.s" 2>/dev/null
+    [ -f "$t_dst.s" ] && rm "$t_dst.s" 2>/dev/null
+
 }
 
 cleanup_exit() {
@@ -146,8 +148,7 @@ db_query() {
 error_exit() {
 
     msg "$1"
-    cleanup
-    exit 1
+    cleanup_exit
 
 }
 
@@ -243,7 +244,7 @@ get_target_path() {
     if [ -n "$db" ]; then
         db_query "SELECT path FROM target WHERE hash = '$(escape_single_quotes "$1")' AND used = 0 LIMIT 1;"
     else
-        _path=$(grep -m 1 "^$1" "$tmp/presync.target")
+        _path=$(grep -m 1 "^$1" "$t_dst")
         printf '%s' "${_path#*|}"
     fi
 
@@ -252,16 +253,15 @@ get_target_path() {
 get_unique_sources(){
 
     if [ -n "$db" ]; then
-        db_query "SELECT s.hash, s.path FROM source s LEFT JOIN target t ON s.hash = t.hash AND s.path = t.path WHERE t.id IS NULL;"
+        db_query "SELECT s.hash, s.path FROM source s LEFT JOIN target t ON s.hash = t.hash AND s.path = t.path WHERE t.id IS NULL;" > "$t_src" \
+            || error_exit "Cannot generate unique sources temp file!"
     else
-        sort "$tmp/presync.source" > "$tmp/presync.source.sorted" \
-            && sort "$tmp/presync.target" > "$tmp/presync.target.sorted" \
-            && comm -23 "$tmp/presync.source.sorted" "$tmp/presync.target.sorted" > "$tmp/presync.source" \
-            && comm -13 "$tmp/presync.source.sorted" "$tmp/presync.target.sorted" > "$tmp/presync.target" \
-            || error_exit "Cannot write to temp file!"
-        rm "$tmp/presync.source.sorted" "$tmp/presync.target.sorted"
-
-        cat "$tmp/presync.source"
+        sort "$t_src" > "$t_src.s" \
+            && sort "$t_dst" > "$t_dst.s" \
+            && comm -23 "$t_src.s" "$t_dst.s" > "$t_src" \
+            && comm -13 "$t_src.s" "$t_dst.s" > "$t_dst" \
+            && rm "$t_src.s" "$t_dst.s" \
+            || error_exit "Cannot generate unique sources temp files!"
     fi
 
 }
@@ -370,14 +370,18 @@ main() {
     [ "${dst#/}" = "$dst" ] && [ "${dst#./}" = "$dst" ] && dst="./$dst"
     [ "${tmp#/}" = "$tmp" ] && [ "${tmp#./}" = "$tmp" ] && tmp="./$tmp"
 
+    # even in db mode we use at least t_src to loop without a subshell
+    t_src="$tmp/presync.source"
+    t_dst="$tmp/presync.target"
+
     if ! (have_command "sqlite3"); then
 
         for cmd in comm cat grep sort; do
             ! (have_command "$cmd") && error_exit "Error: presync requires $cmd command to run in plaintext mode."
         done
 
-        [ -f "$tmp/presync.source" ] && rm "$tmp/presync.source" 2>/dev/null
-        [ -f "$tmp/presync.target" ] && rm "$tmp/presync.target" 2>/dev/null
+        [ -f "$t_src" ] && rm "$t_src" 2>/dev/null
+        [ -f "$t_dst" ] && rm "$t_dst" 2>/dev/null
 
         msg "Notice: command sqlite3 not found - using slower plain text mode"
 
@@ -549,7 +553,7 @@ rename_conflicting_target() {
             if [ -z "$db" ]; then
                 _file_rel="${_file#"$_dir"}"
                 has_newline "$_file_rel" && _file_rel=$(escape_nl "$_file_rel")
-                _hash=$(grep -m 1 -F -- "$_file_rel" "$tmp/presync.target")
+                _hash=$(grep -m 1 -F -- "$_file_rel" "$t_dst")
                 _hash="${_hash%%|*}"
             fi
 
@@ -667,7 +671,9 @@ sync_target() {
 
     msg "presync-ing..."
 
-    get_unique_sources | while IFS= read -r row; do
+    get_unique_sources
+
+    while IFS= read -r row; do
 
         # This handles filenames with pipe character because the filename column is the last from the query
         file="${row#*|}"
@@ -699,8 +705,6 @@ sync_target() {
             [ -f "$target" ] && rename_conflicting_target "$target"
 
             # Create intermediary folders as needed
-            # [ ! -d "${target%/*}" ] && mkdir -p "${target%/*}"
-
             if [ ! -d "${target%/*}" ]; then
 
                 # Is the dir to be created an already existing file or contains an existing file in its path?
@@ -731,7 +735,7 @@ sync_target() {
 
         fi
 
-    done
+    done < "$t_src"
 
     cleanup
     prune_dirs
@@ -761,15 +765,15 @@ update_target_path() {
         # use intermediate temp file for text editing
         if [ -z "$maybe_used" ]; then
             # update path of existing file with different content
-            grep -v -F "$hash|$old_path_rel" "$tmp/presync.target" > "$tmp/presync.target.tmp"
-            printf '%s\n' "$hash|$new_path_rel" >> "$tmp/presync.target.tmp"
-            mv "$tmp/presync.target.tmp" "$tmp/presync.target"
-
+            grep -v -F "$hash|$old_path_rel" "$t_dst" > "$t_dst.tmp" \
+            && printf '%s\n' "$hash|$new_path_rel" >> "$t_dst.tmp" \
+            && mv "$t_dst.tmp" "$t_dst" \
+            || error_exit "Error updating target db entry!"
         else
             # delete the line has same effect as updating path and used state for now
-            grep -v -F "$hash|$old_path_rel" "$tmp/presync.target" > "$tmp/presync.target.tmp"
-            mv "$tmp/presync.target.tmp" "$tmp/presync.target"
-
+            grep -v -F "$hash|$old_path_rel" "$t_dst" > "$t_dst.tmp" \
+            && mv "$t_dst.tmp" "$t_dst" \
+            || error_exit "Error updating target db entry!"
         fi
 
     fi
