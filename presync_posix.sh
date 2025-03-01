@@ -27,7 +27,7 @@
 
 set -o nounset
 
-VERSION="1.3"
+VERSION="1.4"
 TARGET_USED="1"
 TARGET_CONFLICT="0"
 src=""
@@ -141,7 +141,7 @@ CREATE TABLE target (
 
 db_query() {
 
-    printf '%s' "$1" | sqlite3 "$db" || error_exit "sqlite3 database query error!: $1"
+    sqlite3 "$db" "$1" || error_exit "sqlite3 database query error!: $1"
 
 }
 
@@ -376,7 +376,7 @@ main() {
 
     if ! (have_command "sqlite3"); then
 
-        for cmd in comm cat grep sort; do
+        for cmd in comm grep sort; do
             ! (have_command "$cmd") && error_exit "Error: presync requires $cmd command to run in plaintext mode."
         done
 
