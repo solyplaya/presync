@@ -71,6 +71,7 @@ cleanup() {
         [ -f "$t_dst.s" ] && rm "$t_dst.s" 2>/dev/null
         [ -f "$t_dr" ] && rm "$t_dr" 2>/dev/null
         [ -f "$t_dr.last_file" ] && rm "$t_dr.last_file" 2>/dev/null
+        [ -f "$t_dr.dir_exists" ] && rm "$t_dr.dir_exists" 2>/dev/null
         [ -f "$t_dr.source" ] && rm "$t_dr.source" 2>/dev/null
         [ -f "$t_dr.target" ] && rm "$t_dr.target" 2>/dev/null
     elif [ -n "$last_file" ]; then
@@ -147,6 +148,8 @@ db_init() {
         [ -f "$t_src" ] && rm "$t_src"
         [ -f "$t_dst" ] && rm "$t_dst"
         [ -f "$t_dr" ] && rm "$t_dr"
+        [ -f "$t_dr.last_file" ] && rm "$t_dr.last_file"
+        [ -f "$t_dr.dir_exists" ] && rm "$t_dr.dir_exists"
     fi
 
     [ -z "$db" ] && return
@@ -170,6 +173,10 @@ CREATE TABLE target (
     hash TEXT,
     path TEXT,
     used INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE dirs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT
 );
 '
 
@@ -595,10 +602,37 @@ make_path() {
 
         __dir="$__dir/${__file%%/*}"
 
-
         if is_dry_run; then
+
+            # dry run needs to cache virtual dir creation
+
+            if has_newline "$__dir"; then
+                __search=$(escape_nl "$__dir")
+            else
+                __search="$__dir"
+            fi
+
+            if [ -n "$db" ]; then
+
+                # check if we have a virtual dir
+                __temp=$(db_query "SELECT path FROM dirs WHERE path='$(escape_single_quotes "$__search")' LIMIT 1;")
+
+                [ -n "$__temp" ] && return
+
+                # add to virtual dirs table
+                db_query "INSERT OR REPLACE INTO dirs (path) VALUES ('$(escape_single_quotes "$__search")');"
+            else
+
+                # check virtual dir exists
+                grep -x -F -- "$__search" "$t_dr.dir_exists" > /dev/null && return
+
+                # add to virtual dirs file
+                printf '%s\n' "$__search" >> "$t_dr.dir_exists"
+            fi
+
             # check existence of file only in our database
             target_exists_in_db "$__dir" && rename_conflicting_target "$__dir"
+
         else
 
             # path exists as a regular file or symlink, try to rename
