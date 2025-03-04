@@ -3,11 +3,10 @@
 ### TODO
 
 - [ ] wite test files for unreadable files / unreadable folders
+- [ ] wite test files for `--dry-run` and `--resume`
 - [ ] check proper exit code handling in `--muted` mode
 - [ ] test filesystem exFat / NTFS to use intermediary filename renames with changing only letter case (file -> FILE... is problematic in NTFS)
 - [ ] consolidate a single version of the script
-- [ ] add dry-run to posix version (with renaming track in a database colums for used and renamed files for better simulation)
-- [ ] add reuse db functionality to posix version, simplified non-interactive params `--keep-db` and `--resume`
 - [ ] add support for SSH in source or target (but not both)
 - [ ] add stats of actions done
 - [ ] log file option? (moved files and renamed files in the log)
@@ -16,6 +15,8 @@
 
 ### DONE
 
+- [x] add dry-run to posix version (using cop yof database to simulate filename collisions and renames)
+- [x] add reuse db functionality to posix version, simplified non-interactive params `--keep-db` and `--resume` (only keep on dry-run)
 - [x] review proper exit on error in `db_query` (no longer runs in a subshell, so exit does properly terminate the script)
 - [x] implement end of params with -- in options processing
 - [x] add tests for filenames with newline characters and problematic / non printable character combinations

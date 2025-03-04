@@ -27,21 +27,27 @@
 
 set -o nounset
 
-VERSION="1.4"
+VERSION="1.5"
 TARGET_USED="1"
 TARGET_CONFLICT="0"
 src=""
 dst=""
+src_slash=""
+dst_slash=""
 db=""
 t_src=""
 t_dst=""
+t_dr=""
 hasher=""
 head_size=0
 muted=0
 prune_dirs=0
+resume=""
+dry_run=""
 tmp="/tmp"
 nl_placeholder="<<_NEW_LINE_>>"
 global_string=""
+last_file=""
 
 # special characters for message printing filter
 _SUB=$(printf "\032")  # SUB character (ASCII 26) - as a visual substitute for unprintable chars
@@ -57,11 +63,20 @@ _LF="${_LF%#}"         # $(...) removes trailing newlines, so use an extra char 
 
 cleanup() {
 
-    [ -f "$db" ] && rm "$db" 2>/dev/null
-    [ -f "$t_src" ] && rm "$t_src" 2>/dev/null
-    [ -f "$t_dst" ] && rm "$t_dst" 2>/dev/null
-    [ -f "$t_src.s" ] && rm "$t_src.s" 2>/dev/null
-    [ -f "$t_dst.s" ] && rm "$t_dst.s" 2>/dev/null
+    if [ -z "$dry_run" ]; then
+        [ -f "$db" ] && rm "$db" 2>/dev/null
+        [ -f "$t_src" ] && rm "$t_src" 2>/dev/null
+        [ -f "$t_dst" ] && rm "$t_dst" 2>/dev/null
+        [ -f "$t_src.s" ] && rm "$t_src.s" 2>/dev/null
+        [ -f "$t_dst.s" ] && rm "$t_dst.s" 2>/dev/null
+        [ -f "$t_dr" ] && rm "$t_dr" 2>/dev/null
+        [ -f "$t_dr.last_file" ] && rm "$t_dr.last_file" 2>/dev/null
+        [ -f "$t_dr.source" ] && rm "$t_dr.source" 2>/dev/null
+        [ -f "$t_dr.target" ] && rm "$t_dr.target" 2>/dev/null
+    elif [ -n "$last_file" ]; then
+        # store the last_file if not empty (and was dry-run)
+        printf '%s\n' "$last_file" > "$t_dr.last_file" 2>/dev/null
+    fi
 
 }
 
@@ -72,13 +87,13 @@ cleanup_exit() {
 
 }
 
-collect_hashes() {
+ collect_hashes() {
 
     # posix compliant recursive file loop using path expansion
     # does not create a subshell and handles filenames with newline characters
     # deals only with files (ignores symlinks)
 
-    # uses global variables: table, directory
+    # uses global variables: table, directory, resume_file
 
     for item in "$1"/* "$1"/.*; do
 
@@ -91,6 +106,13 @@ collect_hashes() {
 
             if [ -f "$item" ]; then
 
+                if [ -n "$resume_file" ]; then
+                    if [ "$resume_file" = "$item" ]; then
+                        resume_file=""
+                    fi
+                    continue
+                fi
+
                 hash=$(get_hash_from_file "$item")
 
                 if [ -n "$hash" ]; then
@@ -102,10 +124,12 @@ collect_hashes() {
                     fi
 
                     if [ -n "$db" ]; then
-                        db_query "INSERT OR REPLACE INTO $table (hash, path) VALUES ('$(escape_single_quotes "$hash")', '$(escape_single_quotes "$file_rel")');"
+                        printf '%s\n' "('$(escape_single_quotes "$hash")','$(escape_single_quotes "$file_rel")')," >> "$tmp/presync.$table" || error_exit_fs
                     else
-                        printf '%s\n' "$hash|$file_rel" >> "$tmp/presync.$table"
+                        printf '%s\n' "$hash|$file_rel" >> "$tmp/presync.$table" || error_exit_fs
                     fi
+
+                    is_dry_run && last_file="$file_rel"
 
                 else
                     msg "Error: cannot generate checksum for file: $item"
@@ -119,8 +143,20 @@ collect_hashes() {
 
 db_init() {
 
+    if [ -z "$resume" ]; then
+        [ -f "$t_src" ] && rm "$t_src"
+        [ -f "$t_dst" ] && rm "$t_dst"
+        [ -f "$t_dr" ] && rm "$t_dr"
+    fi
+
     [ -z "$db" ] && return
-    [ -f "$db" ] && rm "$db"
+
+    if [ -f "$db" ]; then
+        [ -n "$resume" ] && return
+        rm "$db"
+    else
+        resume=""
+    fi
 
     db_query '
 CREATE TABLE source (
@@ -145,6 +181,27 @@ db_query() {
 
 }
 
+dry_run_prepare() {
+
+    if [ -n "$dry_run" ]; then
+
+        msg "Dry run mode: no filesystem changes."
+        msg "Use --resume in the next run to reuse the database."
+
+        if [ -n "$db" ]; then
+            cp "$db" "$t_dr" || error_exit_fs
+            db="$t_dr"
+        else
+            cp "$t_dst" "$t_dr" || error_exit_fs
+            t_dst="$t_dr"
+        fi
+
+    else
+        [ -f "$t_dr" ] && rm "$t_dr"
+    fi
+
+}
+
 error_exit() {
 
     msg "$1"
@@ -152,15 +209,9 @@ error_exit() {
 
 }
 
-escape_backslashes() {
+error_exit_fs() {
 
-    escape_string "$1" "\\" "\\\\"
-
-}
-
-escape_forwardslashes() {
-
-    escape_string "$1" "/" "\\/"
+    error_exit "Error creating temp file!"
 
 }
 
@@ -172,7 +223,11 @@ escape_nl() {
 
 escape_single_quotes() {
 
-    escape_string "$1" "'" "''"
+    if has_string "$1" "'"; then
+        escape_string "$1" "'" "''"
+    else
+        printf '%s' "$1"
+    fi
 
 }
 
@@ -239,12 +294,32 @@ get_hash_from_file() {
 
 }
 
+get_hash_from_plaintext() {
+
+    _search="$1"
+    has_newline "$_search" && _search=$(escape_nl "$_search")
+
+    grep -F "|$_search" "$t_dst" | while IFS= read -r line; do
+        if [ "${line#*|}" = "$_search" ]; then
+            printf '%s' "${line%%|*}"
+            break
+        fi
+    done
+
+}
+
+get_last_line() {
+
+    [ -f "$1" ] && tail -n 1 "$1"
+
+}
+
 get_target_path() {
 
     if [ -n "$db" ]; then
         db_query "SELECT path FROM target WHERE hash = '$(escape_single_quotes "$1")' AND used = 0 LIMIT 1;"
     else
-        _path=$(grep -m 1 "^$1" "$t_dst")
+        _path=$(grep -m 1 "^$1|" "$t_dst")
         printf '%s' "${_path#*|}"
     fi
 
@@ -252,16 +327,49 @@ get_target_path() {
 
 get_unique_sources(){
 
-    if [ -n "$db" ]; then
-        db_query "SELECT s.hash, s.path FROM source s LEFT JOIN target t ON s.hash = t.hash AND s.path = t.path WHERE t.id IS NULL;" > "$t_src" \
-            || error_exit "Cannot generate unique sources temp file!"
-    else
-        sort "$t_src" > "$t_src.s" \
-            && sort "$t_dst" > "$t_dst.s" \
-            && comm -23 "$t_src.s" "$t_dst.s" > "$t_src" \
-            && comm -13 "$t_src.s" "$t_dst.s" > "$t_dst" \
-            && rm "$t_src.s" "$t_dst.s" \
-            || error_exit "Cannot generate unique sources temp files!"
+    if [ -z "$resume" ]; then
+
+        if [ -n "$db" ]; then
+
+            sort "$t_src" > "$t_src.s" \
+                && sort "$t_dst" > "$t_dst.s" \
+                && comm -23 "$t_src.s" "$t_dst.s" > "$t_src" \
+                && comm -13 "$t_src.s" "$t_dst.s" > "$t_dst" \
+                && rm "$t_src.s" "$t_dst.s" \
+                || error_exit_fs
+
+                {
+                    printf '%s\n' "INSERT INTO source (hash, path) VALUES"
+                    head -n -1 "$t_src"
+                    last_line=$(tail -n 1 "$t_src")
+                    last_line="${last_line%,};"
+                    printf '%s\n' "$last_line"
+                } > "$t_src.s" || error_exit_fs
+
+                {
+                    printf '%s\n' "INSERT INTO target (hash, path) VALUES"
+                    head -n -1 "$t_dst"
+                    last_line=$(tail -n 1 "$t_dst")
+                    last_line="${last_line%,};"
+                    printf '%s\n' "$last_line"
+                } > "$t_dst.s" || error_exit_fs
+
+                # this may hit the maximum number of arguments of shell, should divide in batches ok a few Ks...
+                sqlite3 "$db" < "$t_src.s" || error_exit "sqlite3 database batch insert error!"
+                sqlite3 "$db" < "$t_dst.s" || error_exit "sqlite3 database batch insert error!"
+                rm "$t_src.s" "$t_dst.s"
+                db_query "SELECT hash, path FROM source ORDER BY id;" > "$t_src" || error_exit_fs
+        else
+            sort "$t_src" > "$t_src.s" \
+                && sort "$t_dst" > "$t_dst.s" \
+                && comm -23 "$t_src.s" "$t_dst.s" > "$t_src" \
+                && comm -13 "$t_src.s" "$t_dst.s" > "$t_dst" \
+                && rm "$t_src.s" "$t_dst.s" \
+                || error_exit_fs
+        fi
+    elif [ -n "$db" ]; then
+            # Here records are already unique and sorted since we import via transaction from plaintext file
+            db_query "SELECT hash, path FROM source ORDER BY id;" > "$t_src" || error_exit_fs
     fi
 
 }
@@ -290,6 +398,21 @@ has_placeholders() {
 
 }
 
+has_string() {
+
+    case "$1" in
+        *"$2"*) return 0;;
+        *) return 1;;
+    esac
+
+}
+
+is_dry_run() {
+
+    [ -n "$dry_run" ]
+
+}
+
 main() {
 
     _custom_db=""
@@ -303,10 +426,11 @@ main() {
                 _custom_db="${2:-}"
                 shift
                 ;;
+            --dry-run)
+                dry_run=1
+                ;;
             --tmp)
                 tmp="${2:-}"
-                # trim trailing forward slash
-                [ -n "$tmp" ] && tmp="${tmp%/}"
                 shift
                 ;;
             --hasher)
@@ -332,6 +456,9 @@ main() {
                 ;;
             --prune-dirs)
                 prune_dirs=1
+                ;;
+            --resume|r)
+                resume=1
                 ;;
             --)
                 shift
@@ -370,20 +497,44 @@ main() {
     [ "${dst#/}" = "$dst" ] && [ "${dst#./}" = "$dst" ] && dst="./$dst"
     [ "${tmp#/}" = "$tmp" ] && [ "${tmp#./}" = "$tmp" ] && tmp="./$tmp"
 
+    # strip trailing slashes from path without using a function to preserve a possible trailing newline
+    if [ "$src" != "/" ] && [ "$src" != "./" ]; then
+        while [ "${src#"${src%?}"}" = "/" ]; do src="${src%/}"; done
+    fi
+
+    if [ "$dst" != "/" ] && [ "$dst" != "./" ]; then
+        while [ "${dst#"${dst%?}"}" = "/" ]; do dst="${dst%/}"; done
+    fi
+
+    if [ "$tmp" != "/" ] && [ "$tmp" != "./" ]; then
+        while [ "${tmp#"${tmp%?}"}" = "/" ]; do tmp="${tmp%/}"; done
+    fi
+
+    # if src and dst are the same, do nothing!
+    if [ "$src" = "$dst" ]; then
+        error_exit "Source and destination arguments are the same!"
+    fi
+
+    src_slash="${src%/}/"
+    dst_slash="${dst%/}/"
+
     # even in db mode we use at least t_src to loop without a subshell
     t_src="$tmp/presync.source"
     t_dst="$tmp/presync.target"
+    t_dr="$tmp/presync.dry-run"
 
-    if ! (have_command "sqlite3"); then
+    # disable resume if we have not collected any hashes
+    if [ -n "$resume" ]; then
+        [ ! -f "$t_src" ] && [ ! -f "$t_dst" ] && resume=""
+    fi
 
-        for cmd in comm grep sort; do
-            ! (have_command "$cmd") && error_exit "Error: presync requires $cmd command to run in plaintext mode."
-        done
+    for cmd in comm grep head sort tail; do
+        ! (have_command "$cmd") && error_exit "Error: presync requires $cmd command to run."
+    done
 
-        [ -f "$t_src" ] && rm "$t_src" 2>/dev/null
-        [ -f "$t_dst" ] && rm "$t_dst" 2>/dev/null
+    if ! have_command "sqlite3"; then
 
-        msg "Notice: command sqlite3 not found - using slower plain text mode"
+        msg "Notice: command sqlite3 not found! Using plain text mode."
 
     else
 
@@ -396,7 +547,11 @@ main() {
         # prevent interpretation of paths as arguments
         [ "${db#/}" = "$db" ] && [ "${db#./}" = "$db" ] && db="./$db"
 
-        touch "$db" 2>/dev/null
+
+        if [ ! -f "$db" ]; then
+            resume=""
+            printf '' > "$db" 2>/dev/null
+        fi
 
         if [ ! -w "$db" ]; then
             error_exit "Cannot write database file: $db"
@@ -440,14 +595,23 @@ make_path() {
 
         __dir="$__dir/${__file%%/*}"
 
-        # path exists as a regular file or symlink, try to rename
-        if [ -f "$__dir" ] || [ -h "$__dir" ]; then
-            rename_conflicting_target "$__dir"
+
+        if is_dry_run; then
+            # check existence of file only in our database
+            target_exists_in_db "$__dir" && rename_conflicting_target "$__dir"
+        else
+
+            # path exists as a regular file or symlink, try to rename
+            if [ -f "$__dir" ] || [ -h "$__dir" ]; then
+                rename_conflicting_target "$__dir"
+            fi
+
+            if [ ! -e "$__dir" ]; then
+                mkdir "$__dir" || return
+            fi
+
         fi
 
-        if [ ! -e "$__dir" ]; then
-            mkdir "$__dir" || return
-        fi
         if [ "$__file" = "${__file#*/}" ]; then
             __file=""
         else
@@ -535,7 +699,6 @@ prune_parents() {
 rename_conflicting_target() {
 
     _file="$1"
-    _dir="${dst%/}/"
     _idx=1
     _target="${_file%/*}/[renamed_${_idx}]-${_file##*/}"
     _hash=""
@@ -545,22 +708,25 @@ rename_conflicting_target() {
         _target="${_file%/*}/[renamed_${_idx}]-${_file##*/}"
     done
 
-    if mv "$_file" "$_target"; then
+    msg "Solving conflict:"
+    msg "  $_file"
+    msg "  $_target"
 
-        # only update target path if moved file was a regular file and not a symlink
-        if [ -f "$_target" ]; then
+    if ! is_dry_run; then
+        mv "$_file" "$_target" || return
+    fi
 
-            if [ -z "$db" ]; then
-                _file_rel="${_file#"$_dir"}"
-                has_newline "$_file_rel" && _file_rel=$(escape_nl "$_file_rel")
-                _hash=$(grep -m 1 -F -- "$_file_rel" "$t_dst")
-                _hash="${_hash%%|*}"
-            fi
+    # only update target path if moved file was a regular file and not a symlink
+    # in dry-run mode we don't move the file, so have to check on the filename before moving
+    if is_dry_run && [ -f "$_file" ] || [ -f "$_target" ]; then
 
-            # hash is only required in plain text mode
-            update_target_path "$_file" "$_target" "$_hash" "$TARGET_CONFLICT"
-
+        if [ -z "$db" ]; then
+            _file_rel="${_file#"$dst_slash"}"
+            _hash=$(get_hash_from_plaintext "$_file_rel")
         fi
+
+        # hash is only required in plain text mode
+        update_target_path "$_file" "$_target" "$_hash" "$TARGET_CONFLICT"
 
     fi
 
@@ -599,6 +765,49 @@ replace_nl_placeholders() {
 
 }
 
+set_resume_file() {
+
+    # uses global variables table, last_file
+
+    if [ -z "$resume" ] || [ -f "$t_dr.$table" ]; then
+        return
+    fi
+
+    _path=""
+
+    if [ -n "$db" ]; then
+
+        if [ -f "$t_dr.last_file" ]; then
+            while IFS= read -r line; do
+                _path="$line"
+            done < "$t_dr.last_file"
+        fi
+
+    else
+        if [ "$table" = "source" ]; then
+            _path=$(get_last_line "$t_src")
+        else
+            _path=$(get_last_line "$t_dst")
+        fi
+        _path="${_path#*|}"
+    fi
+
+    if [ -n "$_path" ]; then
+        if has_placeholders "$_path"; then
+            replace_nl_placeholders "$_path"
+            _path="$global_string"
+        fi
+
+        if [ "$table" = "source" ]; then
+            resume_file="$src_slash$_path"
+        else
+            resume_file="$dst_slash$_path"
+        fi
+
+    fi
+
+}
+
 show_help() {
 
     printf '%s' "presync.sh (posix) version $VERSION Copyright (c) 2025 Francisco Gonzalez
@@ -611,11 +820,13 @@ Usage: ${0##*/} [OPTION]... SRC DEST
 
 Options
 --database FILE  write the database to the specified FILE
+--dry-run        trial run without file changes
 --hasher CMD     use the given CMD to process file checksums
 --help, -h       show this help
 --muted, -m      don't output any text
 --partial SIZE   calc checksums using at most N kilobytes from file
 --prune-dirs     delete empty diretories left in target after processing
+--resume         resume from a previous --dry-run invocation
 --tmp DIR        path to writable temp directory
 
 presync does not copy or delete any files, only renames existing files in the
@@ -635,7 +846,13 @@ its checksum. This could lead to some false file matchings in the event that
 various files share the same header data. Since no files are deleted or
 overwritten, any incorrectly reorganized files will get resolved by rsync.
 
-Database files are stored in /tmp/presync.sqlite and deleted after every run.
+Database files are stored in /tmp/presync.sqlite and deleted after every run
+unless --dry-run option is provided. If --resume is provided in the next run
+no hash collection will be performed unless it was interrupted by the user, in
+which case collection will resume from the last file in the database. Please
+note that --dry-run simulation does not handle symlink collisions whereas a
+normal run does.
+
 You can specify a custom database file and also a custom temporary directory in
 case /tmp is not a writable path in your system.
 
@@ -655,23 +872,37 @@ synchronize movies collection on slow USB drive with huge files:
 sync_target() {
 
     idx=0
+    resume_file=""
 
     # sqlite3 or plaintext
     db_init
 
-    # collect target hashes
-    table="target"
-    directory="${dst%/}/"
-    collect_hashes "$dst"
-
     # collect source hashes
     table="source"
-    directory="${src%/}/"
-    collect_hashes "$src"
+    if [ -z "$resume" ] || [ ! -f "$t_dr.$table" ]; then
+        directory="$src_slash"
+        set_resume_file
+        msg "Collecting $table hashes..."
+        collect_hashes "$src"
+        last_file=""
+        is_dry_run && printf '' > "$t_dr.$table"
+    fi
+
+    # collect target hashes
+    table="target"
+    if [ -z "$resume" ] || [ ! -f "$t_dr.$table" ]; then
+        directory="$dst_slash"
+        set_resume_file
+        msg "Collecting $table hashes..."
+        collect_hashes "$dst"
+        last_file=""
+        is_dry_run && printf '' > "$t_dr.$table"
+    fi
 
     msg "presync-ing..."
 
     get_unique_sources
+    dry_run_prepare
 
     while IFS= read -r row; do
 
@@ -701,8 +932,15 @@ sync_target() {
 
             msg; msg "[$idx] ${src#./}/$file"
 
-            # Rename existing target with different content since we have a candidate to take its place.
-            [ -f "$target" ] && rename_conflicting_target "$target"
+            # here lies the key to correct dry-run
+            if is_dry_run; then
+                # check existence of file only in our database
+                target_exists_in_db "$target" && rename_conflicting_target "$target"
+            else
+                # Rename existing target with different content since we have a candidate to take its place.
+                # this may be an entry not in the database, like a symlink in our way
+                [ -f "$target" ] && rename_conflicting_target "$target"
+            fi
 
             # Create intermediary folders as needed
             if [ ! -d "${target%/*}" ]; then
@@ -711,35 +949,61 @@ sync_target() {
                 # if so, need to rename in order to accomodate the new file path. We only rename regular files and symlinks.
                 make_path "$dst" "$file"
 
-                if [ ! -d "${target%/*}" ]; then
-                    msg "Cannot create target path: ${target%/*}"
-                    continue
+                if ! is_dry_run; then
+
+                    if [ ! -d "${target%/*}" ]; then
+                        msg "Cannot create target path: ${target%/*}"
+                        continue
+                    fi
                 fi
 
             fi
 
-
-            if [ -f "$target" ]; then
+            if ! is_dry_run && [ -f "$target" ]; then
                 msg  "Error: cannot rename conflicting target: $target"
             else
                 msg "${existing_target#./}"
                 msg "${target#./}"
 
-                if mv "$existing_target" "$target"; then
+                if is_dry_run; then
                     update_target_path "$existing_target" "$target" "$hash" "$TARGET_USED"
                 else
-                    msg "Error: cannot move file!"
+                    if mv "$existing_target" "$target"; then
+                        update_target_path "$existing_target" "$target" "$hash" "$TARGET_USED"
+                    else
+                        msg "Error: cannot move file!"
+                    fi
                 fi
-
             fi
 
         fi
 
     done < "$t_src"
 
+    # prune_dirs simulation adds some complextity to dry_run, so not for now.
+    ! is_dry_run && prune_dirs
     cleanup
-    prune_dirs
+
     msg; msg "Done!"
+
+}
+
+target_exists_in_db() {
+
+    # paths come with nl unescapped
+
+    # make path relative
+    search_path="${1#"$dst_slash"}"
+
+    if [ -n "$db" ]; then
+        has_newline "$search_path" && search_path=$(escape_nl "$search_path")
+        found_hash=$(db_query "SELECT hash FROM target WHERE path = '$(escape_single_quotes "$search_path")' LIMIT 1;")
+    else
+        # get_hash_from_plaintext takes care of escaping nl chars
+        found_hash=$(get_hash_from_plaintext "$search_path")
+    fi
+
+    [ -n "$found_hash" ]
 
 }
 
@@ -748,12 +1012,11 @@ update_target_path() {
     # paths come here with nl unescapped if any
     old_path="$1"
     new_path="$2"
-    hash="$3"
+    __hash="$3"
     maybe_used=""
     [ "${4:-0}" -eq 1 ] && maybe_used=", used=1"
-    directory="${dst%/}/"
-    old_path_rel="${old_path#"$directory"}"
-    new_path_rel="${new_path#"$directory"}"
+    old_path_rel="${old_path#"$dst_slash"}"
+    new_path_rel="${new_path#"$dst_slash"}"
 
     has_newline "$old_path_rel" && old_path_rel=$(escape_nl "$old_path_rel")
     has_newline "$new_path_rel" && new_path_rel=$(escape_nl "$new_path_rel")
@@ -762,20 +1025,30 @@ update_target_path() {
         db_query "UPDATE target SET path='$(escape_single_quotes "$new_path_rel")' $maybe_used WHERE path='$(escape_single_quotes "$old_path_rel")';"
     else
 
-        # use intermediate temp file for text editing
         if [ -z "$maybe_used" ]; then
             # update path of existing file with different content
-            grep -v -F "$hash|$old_path_rel" "$t_dst" > "$t_dst.tmp" \
-            && printf '%s\n' "$hash|$new_path_rel" >> "$t_dst.tmp" \
-            && mv "$t_dst.tmp" "$t_dst" \
-            || error_exit "Error updating target db entry!"
+            update_entry_plaintext "$__hash|$old_path_rel" "$__hash|$new_path_rel"
         else
             # delete the line has same effect as updating path and used state for now
-            grep -v -F "$hash|$old_path_rel" "$t_dst" > "$t_dst.tmp" \
-            && mv "$t_dst.tmp" "$t_dst" \
-            || error_exit "Error updating target db entry!"
+            update_entry_plaintext "$__hash|$old_path_rel"
         fi
 
+    fi
+
+}
+
+update_entry_plaintext() {
+
+    # if arg 2 is empty, just delete the line matching arg 1
+    # use intermediate temp file for text editing
+
+    if [ -n "${2:-}" ]; then
+        grep -v -x -F "$1" "$t_dst" > "$t_dst.tmp"
+        printf '%s\n' "$2" >> "$t_dst.tmp"
+        mv "$t_dst.tmp" "$t_dst" || error_exit_fs
+    else
+        grep -v -x -F "$1" "$t_dst" > "$t_dst.tmp"
+        mv "$t_dst.tmp" "$t_dst" || error_exit_fs
     fi
 
 }
